@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 被2012 () 使用XMLSpy v编辑的 (http://www.altova.com) by -->
+<sc:Package xmlns:sc="http://www.example.com/service-choreography " id="org-structure" name="5个自动活动的串行编排" version="1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance " xsi:schemaLocation="http://www.example.com/service-choreography  workflow-v10.xsd">
+	<sc:Workflow id="init-org-data" name="初始化组织数据" version="1.0.0" type="MAIN" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="deptName" type="string" direction="IN" required="true"/>
+			<sc:Parameter name="postName" type="string" direction="IN" required="true"/>
+			<sc:Parameter name="userName" type="string" direction="IN" required="true"/>
+			<sc:Parameter name="nickName" type="string" direction="IN" required="true"/>
+			<sc:Parameter name="password" type="string" direction="IN" required="true"/>
+			<!-- INOUT参数：必须指定className，用于自动实例化 -->
+			<sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="INOUT"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="INOUT"/>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="INOUT"/>
+			<!-- OUT参数 -->
+			<sc:Parameter name="deptId" type="long" direction="OUT" required="true"/>
+			<sc:Parameter name="postId" type="long" direction="OUT" required="true"/>
+			<sc:Parameter name="userId" type="long" direction="OUT" required="true"/>
+			<sc:Parameter name="userDetail" type="bean" className="com.hbs.site.module.system.dal.dataobject.user.AdminUserDO" direction="OUT"/>
+			<sc:Parameter name="deptDetail" type="bean" className="com.hbs.site.module.system.dal.dataobject.dept.DeptDO" direction="OUT"/>
+			<sc:Parameter name="result" type="map" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<!-- 开始事件 -->
+			<sc:Activity id="start" name="开始" type="START_EVENT">
+				<sc:StartEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptName" target="#deptName"/>
+						<sc:Input source="#postName" target="#postName"/>
+						<sc:Input source="#userName" target="#userName"/>
+						<sc:Input source="#nickName" target="#nickName"/>
+						<sc:Input source="#password" target="#password"/>
+					</sc:DataMapping>
+				</sc:StartEvent>
+			</sc:Activity>
+			<!-- 创建部门：关键点1 - 显式创建VO对象 -->
+			<sc:Activity id="createDept" name="创建部门" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="createDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- ✅ 第1步：显式实例化deptRequest对象（类名自动实例化） -->
+						<sc:Input source="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" target="#deptRequest" dataType="bean"/>
+						<!-- ✅ 第2步：填充属性 -->
+						<sc:Input source="#deptName" target="#deptRequest.name"/>
+						<sc:Input source="0" target="#deptRequest.status" dataType="int"/>
+						<sc:Input source="0" target="#deptRequest.parentId" dataType="long"/>
+						<sc:Output source="#result" target="#deptId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 创建岗位：关键点2 - 显式创建VO对象 -->
+			<sc:Activity id="createPost" name="创建岗位" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="createPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- ✅ 显式实例化postRequest -->
+						<sc:Input source="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" target="#postRequest" dataType="bean"/>
+						<sc:Input source="#postName" target="#postRequest.name"/>
+						<sc:Input source="'POSTCode_' + #postName" target="#postRequest.code"/>
+						<sc:Input source="0" target="#postRequest.status" dataType="int"/>
+						<sc:Output source="#result" target="#postId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 创建用户：关键点3 - 显式创建VO对象 -->
+			<sc:Activity id="createUser" name="创建用户" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="createUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- ✅ 显式实例化userRequest -->
+						<sc:Input source="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" target="#userRequest" dataType="bean"/>
+						<sc:Input source="#userName" target="#userRequest.username"/>
+						<sc:Input source="#nickName" target="#userRequest.nickname"/>
+						<sc:Input source="#password" target="#userRequest.password"/>
+						<sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+						<sc:Input source="#postId" target="#userRequest.postIds" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Input source="#userName + '@hbs.com'" target="#userRequest.email"/>
+						<sc:Input source="#userName" target="#userRequest.mobile"/>
+						<sc:Input source="1" target="#userRequest.sex" dataType="int"/>
+						<sc:Output source="#result" target="#userId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 查询用户详情 -->
+			<sc:Activity id="queryUser" name="查询用户详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="getUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userId" target="#userId" dataType="long"/>
+						<sc:Output source="#result" target="#userDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 查询部门详情 -->
+			<sc:Activity id="queryDept" name="查询部门详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="getDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptId" target="#deptId" dataType="long"/>
+						<sc:Output source="#result" target="#deptDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 结束事件 -->
+			<sc:Activity id="end" name="结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#userDetail" target="#result.user"/>
+						<sc:Output source="#deptDetail" target="#result.dept"/>
+						<sc:Output source="#postId" target="#result.postId"/>
+						<sc:Output source="#userId" target="#result.userId"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="t1" from="start" to="createDept"/>
+			<sc:Transition id="t2" from="createDept" to="createPost"/>
+			<sc:Transition id="t3" from="createPost" to="createUser"/>
+			<sc:Transition id="t4" from="createUser" to="queryUser"/>
+			<sc:Transition id="t5" from="queryUser" to="queryDept"/>
+			<sc:Transition id="t6" from="queryDept" to="end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+</sc:Package>

@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 被2012 () 使用XMLSpy v编辑的 (http://www.altova.com) by -->
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" id="org-structure-2sub" name="双Sub流程组织初始化" version="3.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+	<!-- ==================== Main Workflow ==================== -->
+	<sc:Workflow id="main-2sub-process" name="主流程-双Sub组织初始化" version="3.1.0" type="MAIN" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="deptId" type="long" direction="OUT"/>
+			<sc:Parameter name="postResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+			<sc:Parameter name="userResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<!-- 开始 -->
+			<sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<!-- 自动任务1：创建部门 -->
+			<sc:Activity id="main-createDept" name="创建部门" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="createDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#deptId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 子流程1：岗位处理 -->
+			<sc:Activity id="main-subPost" name="调用子流程-岗位处理" type="SUB_PROCESS">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="org-structure-2sub" workflowId="sub-post-process" version="3.1.0"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptId" target="#deptId" dataType="long"/>
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+						<!-- ✅ 修复：同时输出到独立变量和Map -->
+						<sc:Output source="#subResult.postId" target="#postId"/>
+						<sc:Output source="#subResult.postId" target="#postResult.postId"/>
+						<sc:Output source="#subResult.postDetail" target="#postResult.postDetail"/>
+					</sc:DataMapping>
+					<sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 子流程2：用户处理 -->
+			<sc:Activity id="main-subUser" name="调用子流程-用户处理" type="SUB_PROCESS">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="org-structure-2sub" workflowId="sub-user-process" version="3.1.0"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptId" target="#deptId" dataType="long"/>
+						<sc:Input source="#postId" target="#postId" dataType="long"/>
+						<sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+						<!-- ✅ 修复：同时输出到独立变量和Map -->
+						<sc:Output source="#subResult.userId" target="#userId"/>
+						<sc:Output source="#subResult.userId" target="#userResult.userId"/>
+						<sc:Output source="#subResult.userDetail" target="#userResult.userDetail"/>
+					</sc:DataMapping>
+					<sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 自动任务2：查询岗位详情 -->
+			<sc:Activity id="main-queryPost" name="查询岗位详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="getPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- ✅ 从独立变量获取 -->
+						<sc:Input source="#postId" target="#postId" dataType="long"/>
+						<sc:Output source="#result" target="#postResult.postDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 自动任务3：查询用户详情 -->
+			<sc:Activity id="main-queryUser" name="查询用户详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="getUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- ✅ 从独立变量获取 -->
+						<sc:Input source="#userId" target="#userId" dataType="long"/>
+						<sc:Output source="#result" target="#userResult.userDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 结束事件 -->
+			<sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#deptId" target="#finalReport.deptId"/>
+						<sc:Output source="#postResult" target="#finalReport.postResult"/>
+						<sc:Output source="#userResult" target="#finalReport.userResult"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="t1" from="main-start" to="main-createDept"/>
+			<sc:Transition id="t2" from="main-createDept" to="main-subPost"/>
+			<sc:Transition id="t3" from="main-subPost" to="main-subUser"/>
+			<sc:Transition id="t4" from="main-subUser" to="main-queryPost"/>
+			<sc:Transition id="t5" from="main-queryPost" to="main-queryUser"/>
+			<sc:Transition id="t6" from="main-queryUser" to="main-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+	<!-- ==================== Sub Workflow 1: 岗位处理 ==================== -->
+	<sc:Workflow id="sub-post-process" name="子流程-岗位处理" version="3.1.0" type="SUB" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="subPost-start" name="岗位流程开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<sc:Activity id="subPost-create" name="创建岗位" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="createPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#postId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subPost-query" name="查询岗位详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="getPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postId" target="#postId" dataType="long"/>
+						<sc:Output source="#result" target="#subResult.postDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subPost-getList" name="查询岗位列表验证" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="getPostList"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postId" target="#ids" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Output source="#result" target="#postList"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subPost-end" name="岗位流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#postId" target="#subResult.postId"/>
+						<sc:Output source="'岗位创建成功'" target="#subResult.message"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="sp1" from="subPost-start" to="subPost-create"/>
+			<sc:Transition id="sp2" from="subPost-create" to="subPost-query"/>
+			<sc:Transition id="sp3" from="subPost-query" to="subPost-getList"/>
+			<sc:Transition id="sp4" from="subPost-getList" to="subPost-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+	<!-- ==================== Sub Workflow 2: 用户处理 ==================== -->
+	<sc:Workflow id="sub-user-process" name="子流程-用户处理" version="3.1.0" type="SUB" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+			<sc:Parameter name="postId" type="long" direction="IN" required="true"/>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="subUser-start" name="用户流程开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<sc:Activity id="subUser-create" name="创建用户" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="createUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+						<sc:Input source="#postId" target="#userRequest.postIds" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#userId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subUser-query" name="查询用户详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="getUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userId" target="#userId" dataType="long"/>
+						<sc:Output source="#result" target="#subResult.userDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subUser-getList" name="查询用户列表验证" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="getUserList"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userId" target="#ids" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Output source="#result" target="#userList"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subUser-end" name="用户流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#userId" target="#subResult.userId"/>
+						<sc:Output source="'用户创建成功'" target="#subResult.message"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="su1" from="subUser-start" to="subUser-create"/>
+			<sc:Transition id="su2" from="subUser-create" to="subUser-query"/>
+			<sc:Transition id="su3" from="subUser-query" to="subUser-getList"/>
+			<sc:Transition id="su4" from="subUser-getList" to="subUser-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+</sc:Package>

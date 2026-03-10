@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography"
+            id="nested-forkjoin-demo"
+            name="嵌套FORKJOIN批量创建演示"
+            version="1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- 主流程：接收部门列表，调用外层FORKJOIN子流程，聚合结果 -->
+    <sc:Workflow id="main-nested-forkjoin" name="主流程-嵌套FORKJOIN" version="1.0.0" type="MAIN" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptList" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="deptPostMap" type="list" direction="OUT"/> <!-- 实际为 List<Map> -->
+            <sc:Parameter name="finalMessage" type="string" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="start" name="开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 外层FORKJOIN子流程：批量处理部门，返回每个部门的结果Map列表 -->
+            <sc:Activity id="outer-forkjoin" name="外层FORKJOIN-部门处理" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="nested-forkjoin-demo" workflowId="outer-forkjoin-dept" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 输入：部门列表 -->
+                        <sc:Input source="#deptList" target="#batchInput" dataType="list"/>
+                        <!-- 输出：每个部门的结果Map，格式为 {deptId: ?, postIds: [?]} -->
+                        <sc:Output source="#deptResult" target="#deptResultList" dataType="list"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="FORKJOIN" timeout="60000">
+                        <sc:ForkJoinConfig threshold="5" parallelism="-1"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <sc:Activity id="end" name="结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 直接输出 deptResultList 作为 deptPostMap（List<Map>） -->
+                        <sc:Output source="#deptResultList" target="#deptPostMap" dataType="list"/>
+                        <sc:Output source="'嵌套FORKJOIN完成，共处理部门' + #deptResultList?.size() + '个'" target="#finalMessage"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="t1" from="start" to="outer-forkjoin"/>
+            <sc:Transition id="t2" from="outer-forkjoin" to="end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- 外层FORKJOIN子流程：处理单个部门，创建部门并启动内层FORKJOIN子流程 -->
+    <sc:Workflow id="outer-forkjoin-dept" name="外层FORKJOIN-部门处理" version="1.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="batchInput" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="deptResult" type="map" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="outer-start" name="外层开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 创建部门 -->
+            <sc:Activity id="create-dept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#batchInput[0]" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 内层FORKJOIN子流程：批量创建岗位（输入映射中动态构建岗位请求列表） -->
+            <sc:Activity id="inner-forkjoin" name="内层FORKJOIN-岗位创建" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="nested-forkjoin-demo" workflowId="inner-forkjoin-post" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 动态构建岗位请求列表，作为内层子流程的batchInput -->
+                        <sc:Input source="#{
+                            {
+                                {
+                                    'name': #batchInput[0].name + '-经理岗',
+                                    'code': #batchInput[0].name + '-MG',
+                                    'status': 0,
+                                    'sort': 10
+                                },
+                                {
+                                    'name': #batchInput[0].name + '-员工岗',
+                                    'code': #batchInput[0].name + '-EMP',
+                                    'status': 0,
+                                    'sort': 20
+                                }
+                            }
+                        }" target="#batchInput" dataType="list"/>
+                        <!-- 接收内层子流程输出的岗位ID列表 -->
+                        <sc:Output source="#postIds" target="#postIds"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="FORKJOIN" timeout="30000">
+                        <sc:ForkJoinConfig threshold="3" parallelism="-1"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <sc:Activity id="outer-end" name="外层结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 构建结果Map -->
+                        <sc:Output source="#{ {'deptId': #deptId, 'postIds': #postIds} }" target="#deptResult"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="ot1" from="outer-start" to="create-dept"/>
+            <sc:Transition id="ot2" from="create-dept" to="inner-forkjoin"/>
+            <sc:Transition id="ot3" from="inner-forkjoin" to="outer-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- 内层FORKJOIN子流程：批量创建岗位 -->
+    <sc:Workflow id="inner-forkjoin-post" name="内层FORKJOIN-岗位创建" version="1.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="batchInput" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="postIds" type="list" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="inner-start" name="内层开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 创建岗位（每个分支执行） -->
+            <sc:Activity id="create-post" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 将batchInput[0] (Map) 转换为PostSaveReqVO -->
+                        <sc:Input source="#batchInput[0]" target="#postRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO"/>
+                        <sc:Output source="#result" target="#postId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 收集岗位ID，每个分支贡献一个单元素列表，FORKJOIN框架自动合并 -->
+            <sc:Activity id="collect-ids" name="收集岗位ID" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#postId"/>
+                        <!-- 这里的SpringBean调用只是占位，实际不需要，但为了满足XSD必须有一个调用 -->
+                        <sc:Output source="#{ {#postId} }" target="#postIds" dataType="list"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="inner-end" name="内层结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#postIds" target="#postIds"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="it1" from="inner-start" to="create-post"/>
+            <sc:Transition id="it2" from="create-post" to="collect-ids"/>
+            <sc:Transition id="it3" from="collect-ids" to="inner-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

@@ -1,0 +1,460 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography"
+            id="gw-exclusive-nested-demo"
+            name="嵌套子流程排他网关示例"
+            version="1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- ==================== 主流程 ==================== -->
+    <sc:Workflow id="main-onboarding-gw" name="主流程-新员工入职(带网关)" version="1.0.0" type="MAIN" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="userType" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="false"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="postType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="permType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="result" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <!-- 开始 -->
+            <sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 主流程排他网关 -->
+            <sc:Activity id="main-gateway" name="用户类型网关" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <!-- ========== 分支1：VIP ========== -->
+            <sc:Activity id="main-vip-createDept" name="VIP-创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- VIP分支调用子流程1（岗位用户处理） -->
+            <sc:Activity id="main-vip-subPostUser" name="VIP-调用子流程1" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-nested-demo" workflowId="sub-postuser-gw" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Input source="#postType" target="#postType" dataType="string"/>
+                        <sc:Input source="#permType" target="#permType" dataType="string"/>
+                        <sc:Output source="#subResult.postId" target="#postId"/>
+                        <sc:Output source="#subResult.userId" target="#userId"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId"/>
+                        <sc:Output source="#subResult.postBranch" target="#postBranch"/>
+                        <sc:Output source="#subResult.permBranch" target="#permBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="45000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <!-- VIP分支标记 -->
+            <sc:Activity id="main-vip-mark" name="VIP分支标记" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'VIP'" target="#arg0"/>
+                        <sc:Output source="#result" target="#executedBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- ========== 分支2：NORMAL ========== -->
+            <!-- 普通用户不创建部门，直接调用子流程1，部门ID传入 null -->
+            <sc:Activity id="main-normal-subPostUser" name="普通-调用子流程1" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-nested-demo" workflowId="sub-postuser-gw" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="null" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Input source="#postType" target="#postType" dataType="string"/>
+                        <sc:Input source="#permType" target="#permType" dataType="string"/>
+                        <sc:Output source="#subResult.postId" target="#postId"/>
+                        <sc:Output source="#subResult.userId" target="#userId"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId"/>
+                        <sc:Output source="#subResult.postBranch" target="#postBranch"/>
+                        <sc:Output source="#subResult.permBranch" target="#permBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="45000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-normal-mark" name="普通分支标记" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'NORMAL'" target="#arg0"/>
+                        <sc:Output source="#result" target="#executedBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- ========== 分支3：ENTERPRISE ========== -->
+            <sc:Activity id="main-ent-createDept" name="企业-创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-ent-subPostUser" name="企业-调用子流程1" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-nested-demo" workflowId="sub-postuser-gw" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Input source="#postType" target="#postType" dataType="string"/>
+                        <sc:Input source="#permType" target="#permType" dataType="string"/>
+                        <sc:Output source="#subResult.postId" target="#postId"/>
+                        <sc:Output source="#subResult.userId" target="#userId"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId"/>
+                        <sc:Output source="#subResult.postBranch" target="#postBranch"/>
+                        <sc:Output source="#subResult.permBranch" target="#permBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="45000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-ent-mark" name="企业分支标记" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'ENTERPRISE'" target="#arg0"/>
+                        <sc:Output source="#result" target="#executedBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 合并网关 -->
+            <sc:Activity id="main-merge" name="主流程合并" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <!-- 查询岗位详情（共用）- 直接输出到 result.postDetail -->
+            <sc:Activity id="main-queryPost" name="查询岗位详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#result" target="#result.postDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 查询用户详情（共用）- 直接输出到 result.userDetail -->
+            <sc:Activity id="main-queryUser" name="查询用户详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#result.userDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 查询角色详情（共用）- 直接输出到 result.roleDetail -->
+            <sc:Activity id="main-queryRole" name="查询角色详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="getRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#result" target="#result.roleDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 结束事件：构建最终结果（已包含所有详情） -->
+            <sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#executedBranch" target="#result.executedBranch"/>
+                        <sc:Output source="#deptId" target="#result.deptId"/>
+                        <sc:Output source="#postId" target="#result.postId"/>
+                        <sc:Output source="#postBranch" target="#result.postBranch"/>
+                        <sc:Output source="#userId" target="#result.userId"/>
+                        <sc:Output source="#roleId" target="#result.roleId"/>
+                        <sc:Output source="#permBranch" target="#result.permBranch"/>
+                        <!-- postDetail, userDetail, roleDetail 已经在查询活动中直接放入 result，此处不再重复 -->
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="t-start-gateway" from="main-start" to="main-gateway"/>
+
+            <sc:Transition id="t-gateway-vip" from="main-gateway" to="main-vip-createDept" condition="#userType == 'VIP'" priority="10"/>
+            <sc:Transition id="t-gateway-normal" from="main-gateway" to="main-normal-subPostUser" condition="#userType == 'NORMAL'" priority="5"/>
+            <sc:Transition id="t-gateway-enterprise" from="main-gateway" to="main-ent-createDept" condition="#userType == 'ENTERPRISE'" priority="5"/>
+            <sc:Transition id="t-gateway-default" from="main-gateway" to="main-normal-subPostUser" default="true" priority="1"/>
+
+            <sc:Transition id="t-vip1" from="main-vip-createDept" to="main-vip-subPostUser"/>
+            <sc:Transition id="t-vip2" from="main-vip-subPostUser" to="main-vip-mark"/>
+            <sc:Transition id="t-vip3" from="main-vip-mark" to="main-merge"/>
+
+            <sc:Transition id="t-normal1" from="main-normal-subPostUser" to="main-normal-mark"/>
+            <sc:Transition id="t-normal2" from="main-normal-mark" to="main-merge"/>
+
+            <sc:Transition id="t-ent1" from="main-ent-createDept" to="main-ent-subPostUser"/>
+            <sc:Transition id="t-ent2" from="main-ent-subPostUser" to="main-ent-mark"/>
+            <sc:Transition id="t-ent3" from="main-ent-mark" to="main-merge"/>
+
+            <sc:Transition id="t-merge-queryPost" from="main-merge" to="main-queryPost"/>
+            <sc:Transition id="t-queryPost-queryUser" from="main-queryPost" to="main-queryUser"/>
+            <sc:Transition id="t-queryUser-queryRole" from="main-queryUser" to="main-queryRole"/>
+            <sc:Transition id="t-queryRole-end" from="main-queryRole" to="main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 子流程1：岗位用户处理（含网关） ==================== -->
+    <sc:Workflow id="sub-postuser-gw" name="子流程-岗位用户处理(带网关)" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="false"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="postType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="permType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="subPU-start" name="子流程1开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 子流程1网关：岗位类型 -->
+            <sc:Activity id="subPU-gateway" name="岗位类型网关" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <!-- 分支1：标准岗位 -->
+            <sc:Activity id="subPU-standard-post" name="创建标准岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#postRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#postId"/>
+                        <sc:Output source="'STANDARD'" target="#postBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 分支2：自定义岗位 -->
+            <sc:Activity id="subPU-custom-post" name="创建自定义岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#postRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="99" target="#postRequest.sort" dataType="int"/>
+                        <sc:Output source="#result" target="#postId"/>
+                        <sc:Output source="'CUSTOM'" target="#postBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 合并网关 -->
+            <sc:Activity id="subPU-merge" name="子流程1合并" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <!-- 验证岗位创建（可选） -->
+            <sc:Activity id="subPU-queryPostList" name="验证岗位创建" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPostList"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#ids" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Output source="#result" target="#postList"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 调用子流程2（角色权限处理） -->
+            <sc:Activity id="subPU-subRolePerm" name="调用子流程2" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-nested-demo" workflowId="sub-roleperm-gw" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Input source="#permType" target="#permType" dataType="string"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId"/>
+                        <sc:Output source="#subResult.roleDetail" target="#roleDetail"/>
+                        <sc:Output source="#subResult.permBranch" target="#permBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 创建用户 -->
+            <sc:Activity id="subPU-createUser" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#userRequest.postIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Output source="#result" target="#userId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 验证用户创建 -->
+            <sc:Activity id="subPU-validateUserList" name="验证用户创建" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="validateUserList"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#ids" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Output source="#result" target="#userValidationResult"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 子流程1结束 -->
+            <sc:Activity id="subPU-end" name="子流程1结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#postId" target="#subResult.postId"/>
+                        <sc:Output source="#postBranch" target="#subResult.postBranch"/>
+                        <sc:Output source="#userId" target="#subResult.userId"/>
+                        <sc:Output source="#roleId" target="#subResult.roleId"/>
+                        <sc:Output source="#permBranch" target="#subResult.permBranch"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="spu-start-gateway" from="subPU-start" to="subPU-gateway"/>
+            <sc:Transition id="spu-gateway-standard" from="subPU-gateway" to="subPU-standard-post" condition="#postType == 'STANDARD'" priority="10"/>
+            <sc:Transition id="spu-gateway-custom" from="subPU-gateway" to="subPU-custom-post" condition="#postType == 'CUSTOM'" priority="5"/>
+            <sc:Transition id="spu-gateway-default" from="subPU-gateway" to="subPU-standard-post" default="true" priority="1"/>
+            <sc:Transition id="spu-standard-merge" from="subPU-standard-post" to="subPU-merge"/>
+            <sc:Transition id="spu-custom-merge" from="subPU-custom-post" to="subPU-merge"/>
+            <sc:Transition id="spu-merge-query" from="subPU-merge" to="subPU-queryPostList"/>
+            <sc:Transition id="spu-query-subRole" from="subPU-queryPostList" to="subPU-subRolePerm"/>
+            <sc:Transition id="spu-subRole-createUser" from="subPU-subRolePerm" to="subPU-createUser"/>
+            <sc:Transition id="spu-createUser-validate" from="subPU-createUser" to="subPU-validateUserList"/>
+            <sc:Transition id="spu-validate-end" from="subPU-validateUserList" to="subPU-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 子流程2：角色权限处理（含网关） ==================== -->
+    <sc:Workflow id="sub-roleperm-gw" name="子流程-角色权限处理(带网关)" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="permType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="subRP-start" name="子流程2开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 子流程2网关：权限类型 -->
+            <sc:Activity id="subRP-gateway" name="权限类型网关" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <!-- 分支1：基本权限 -->
+            <sc:Activity id="subRP-basic" name="创建角色(基本权限)" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="createRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="1" target="#type" dataType="int"/>
+                        <sc:Output source="#result" target="#roleId"/>
+                        <sc:Output source="'BASIC'" target="#permBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 分支2：高级权限 -->
+            <sc:Activity id="subRP-advanced" name="创建角色(高级权限)" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="createRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="1" target="#type" dataType="int"/>
+                        <sc:Output source="#result" target="#roleId"/>
+                        <sc:Output source="'ADVANCED'" target="#permBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 合并网关 -->
+            <sc:Activity id="subRP-merge" name="子流程2合并" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <!-- 分配角色菜单（共用） -->
+            <sc:Activity id="subRP-assignMenu" name="分配角色菜单" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="permissionService" method="assignRoleMenu"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 查询角色详情 -->
+            <sc:Activity id="subRP-queryRole" name="查询角色详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="getRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#id" dataType="long"/>
+                        <sc:Output source="#result" target="#roleDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 子流程2结束 -->
+            <sc:Activity id="subRP-end" name="子流程2结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#roleId" target="#subResult.roleId"/>
+                        <sc:Output source="#roleDetail" target="#subResult.roleDetail"/>
+                        <sc:Output source="#permBranch" target="#subResult.permBranch"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="srp-start-gateway" from="subRP-start" to="subRP-gateway"/>
+            <sc:Transition id="srp-gateway-basic" from="subRP-gateway" to="subRP-basic" condition="#permType == 'BASIC'" priority="10"/>
+            <sc:Transition id="srp-gateway-advanced" from="subRP-gateway" to="subRP-advanced" condition="#permType == 'ADVANCED'" priority="5"/>
+            <sc:Transition id="srp-gateway-default" from="subRP-gateway" to="subRP-basic" default="true" priority="1"/>
+            <sc:Transition id="srp-basic-merge" from="subRP-basic" to="subRP-merge"/>
+            <sc:Transition id="srp-advanced-merge" from="subRP-advanced" to="subRP-merge"/>
+            <sc:Transition id="srp-merge-assign" from="subRP-merge" to="subRP-assignMenu"/>
+            <sc:Transition id="srp-assign-query" from="subRP-assignMenu" to="subRP-queryRole"/>
+            <sc:Transition id="srp-query-end" from="subRP-queryRole" to="subRP-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

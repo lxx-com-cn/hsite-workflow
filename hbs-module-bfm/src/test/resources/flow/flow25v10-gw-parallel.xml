@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography"
+            id="parallel-gateway-demo"
+            name="并行网关示例"
+            version="1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <sc:Workflow id="user-init-parallel" name="用户初始化并行流程" version="1.0.0" type="MAIN" contractMode="STRICT">
+        <sc:Parameters>
+            <!-- 输入参数 -->
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <!-- 输出参数 -->
+            <sc:Parameter name="deptId" type="long" direction="OUT"/>
+            <sc:Parameter name="postId" type="long" direction="OUT"/>
+            <sc:Parameter name="roleId" type="long" direction="OUT"/>
+            <sc:Parameter name="userId" type="long" direction="OUT"/>
+            <sc:Parameter name="deptDetail" type="bean" className="com.hbs.site.module.system.dal.dataobject.dept.DeptDO" direction="OUT"/>
+            <sc:Parameter name="postDetail" type="bean" className="com.hbs.site.module.system.dal.dataobject.dept.PostDO" direction="OUT"/>
+            <sc:Parameter name="roleDetail" type="bean" className="com.hbs.site.module.system.dal.dataobject.permission.RoleDO" direction="OUT"/>
+            <sc:Parameter name="userDetail" type="bean" className="com.hbs.site.module.system.dal.dataobject.user.AdminUserDO" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <!-- 开始事件 -->
+            <sc:Activity id="start" name="开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- ==================== 并行网关 SPLIT ==================== -->
+            <sc:Activity id="parallelSplit" name="并行分支开始" type="PARALLEL_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <!-- 分支1：创建部门 -->
+            <sc:Activity id="createDept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 分支2：创建岗位 -->
+            <sc:Activity id="createPost" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#postId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 分支3：创建角色 -->
+            <sc:Activity id="createRole" name="创建角色" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="createRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="1" target="#type" dataType="int"/>
+                        <sc:Output source="#result" target="#roleId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 分支4：创建用户（暂不关联部门岗位） -->
+            <sc:Activity id="createUser" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#userId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- ==================== 并行网关 JOIN ==================== -->
+            <sc:Activity id="parallelJoin" name="并行分支汇聚" type="PARALLEL_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <!-- 汇聚后：查询部门详情 -->
+            <sc:Activity id="queryDept" name="查询部门详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="getDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#id" dataType="long"/>
+                        <sc:Output source="#result" target="#deptDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 查询岗位详情 -->
+            <sc:Activity id="queryPost" name="查询岗位详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#id" dataType="long"/>
+                        <sc:Output source="#result" target="#postDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 查询角色详情 -->
+            <sc:Activity id="queryRole" name="查询角色详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="getRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#id" dataType="long"/>
+                        <sc:Output source="#result" target="#roleDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 查询用户详情 -->
+            <sc:Activity id="queryUser" name="查询用户详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#id" dataType="long"/>
+                        <sc:Output source="#result" target="#userDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 结束事件 -->
+            <sc:Activity id="end" name="结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptId" target="#finalDeptId"/>
+                        <sc:Output source="#postId" target="#finalPostId"/>
+                        <sc:Output source="#roleId" target="#finalRoleId"/>
+                        <sc:Output source="#userId" target="#finalUserId"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <!-- 开始 -> 并行网关SPLIT -->
+            <sc:Transition id="t1" from="start" to="parallelSplit"/>
+
+            <!-- 并行网关SPLIT 到 四个分支 -->
+            <sc:Transition id="t2" from="parallelSplit" to="createDept"/>
+            <sc:Transition id="t3" from="parallelSplit" to="createPost"/>
+            <sc:Transition id="t4" from="parallelSplit" to="createRole"/>
+            <sc:Transition id="t5" from="parallelSplit" to="createUser"/>
+
+            <!-- 各分支完成后汇聚到并行网关JOIN -->
+            <sc:Transition id="t6" from="createDept" to="parallelJoin"/>
+            <sc:Transition id="t7" from="createPost" to="parallelJoin"/>
+            <sc:Transition id="t8" from="createRole" to="parallelJoin"/>
+            <sc:Transition id="t9" from="createUser" to="parallelJoin"/>
+
+            <!-- JOIN 后顺序执行查询任务 -->
+            <sc:Transition id="t10" from="parallelJoin" to="queryDept"/>
+            <sc:Transition id="t11" from="queryDept" to="queryPost"/>
+            <sc:Transition id="t12" from="queryPost" to="queryRole"/>
+            <sc:Transition id="t13" from="queryRole" to="queryUser"/>
+            <sc:Transition id="t14" from="queryUser" to="end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

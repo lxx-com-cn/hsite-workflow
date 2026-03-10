@@ -1,0 +1,2 @@
+com.hbs.site.framework.quartz.config.HbsQuartzAutoConfiguration
+com.hbs.site.framework.quartz.config.HbsAsyncAutoConfiguration

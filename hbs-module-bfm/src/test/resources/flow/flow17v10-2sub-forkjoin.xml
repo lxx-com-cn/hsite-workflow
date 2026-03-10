@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography"
+            id="forkjoin-dual-demo"
+            name="FORKJOIN双批量处理演示"
+            version="1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- 主流程：顺序调用两个FORKJOIN子流程，分别批量创建部门和岗位 -->
+    <sc:Workflow id="main-forkjoin-dual" name="主流程-双FORKJOIN批量" version="1.0.0" type="MAIN" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptList" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="postList" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="batchDeptIds" type="list" direction="OUT"/>
+            <sc:Parameter name="batchPostIds" type="list" direction="OUT"/>
+            <sc:Parameter name="finalMessage" type="string" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="start" name="开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 第一个FORKJOIN子流程：批量创建部门 -->
+            <sc:Activity id="forkjoin-sub-dept" name="批量创建部门" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="forkjoin-dual-demo" workflowId="sub-forkjoin-create-dept" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptList" target="#batchInput" dataType="list"/>
+                        <sc:Output source="#deptIds" target="#batchDeptIds" dataType="list"/>
+                        <sc:Output source="#message" target="#deptMessage" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="FORKJOIN" timeout="60000">
+                        <sc:ForkJoinConfig threshold="5" parallelism="-1"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 第二个FORKJOIN子流程：批量创建岗位 -->
+            <sc:Activity id="forkjoin-sub-post" name="批量创建岗位" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="forkjoin-dual-demo" workflowId="sub-forkjoin-create-post" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postList" target="#batchInput" dataType="list"/>
+                        <sc:Output source="#postIds" target="#batchPostIds" dataType="list"/>
+                        <sc:Output source="#message" target="#postMessage" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="FORKJOIN" timeout="60000">
+                        <sc:ForkJoinConfig threshold="5" parallelism="-1"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <sc:Activity id="end" name="结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#batchDeptIds" target="#batchDeptIds" dataType="list"/>
+                        <sc:Output source="#batchPostIds" target="#batchPostIds" dataType="list"/>
+                        <sc:Output source="'两个批量处理完成，部门' + #batchDeptIds.size() + '个，岗位' + #batchPostIds.size() + '个'" target="#finalMessage" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="t1" from="start" to="forkjoin-sub-dept"/>
+            <sc:Transition id="t2" from="forkjoin-sub-dept" to="forkjoin-sub-post"/>
+            <sc:Transition id="t3" from="forkjoin-sub-post" to="end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- 子流程1：批量创建部门（与之前相同，可复用但ID需唯一） -->
+    <sc:Workflow id="sub-forkjoin-create-dept" name="子流程-批量创建部门" version="1.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="batchInput" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="deptIds" type="list" direction="OUT"/>
+            <sc:Parameter name="message" type="string" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="sub-dept-start" name="子流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <sc:Activity id="sub-dept-create" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#batchInput[0]" target="#deptRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub-dept-end" name="子流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#{ {#deptId} }" target="#deptIds" dataType="list"/>
+                        <sc:Output source="'部门创建成功'" target="#message" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="sd1" from="sub-dept-start" to="sub-dept-create"/>
+            <sc:Transition id="sd2" from="sub-dept-create" to="sub-dept-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- 子流程2：批量创建岗位 -->
+    <sc:Workflow id="sub-forkjoin-create-post" name="子流程-批量创建岗位" version="1.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="batchInput" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="postIds" type="list" direction="OUT"/>
+            <sc:Parameter name="message" type="string" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="sub-post-start" name="子流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <sc:Activity id="sub-post-create" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#batchInput[0]" target="#postRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO"/>
+                        <sc:Output source="#result" target="#postId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub-post-end" name="子流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#{ {#postId} }" target="#postIds" dataType="list"/>
+                        <sc:Output source="'岗位创建成功'" target="#message" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="sp1" from="sub-post-start" to="sub-post-create"/>
+            <sc:Transition id="sp2" from="sub-post-create" to="sub-post-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

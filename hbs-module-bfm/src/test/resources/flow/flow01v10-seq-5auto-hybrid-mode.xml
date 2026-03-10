@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" id="org-structure-hybrid-mode" name="组织初始化-混合模式" version="2.0.0">
+	<sc:Workflow id="init-org-data" name="初始化组织数据" version="2.0.0" type="MAIN" contractMode="STRICT" expressionLanguage="SpEL">
+		<sc:Parameters>
+			<!-- IN参数 -->
+			<sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN"/>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN"/>
+			<!-- 原子变量 -->
+			<sc:Parameter name="deptName" type="string" direction="IN"/>
+			<sc:Parameter name="postName" type="string" direction="IN"/>
+			<sc:Parameter name="userName" type="string" direction="IN"/>
+			<!-- OUT参数 -->
+			<sc:Parameter name="deptId" type="long" direction="OUT" required="true"/>
+			<sc:Parameter name="postId" type="long" direction="OUT" required="true"/>
+			<sc:Parameter name="userId" type="long" direction="OUT" required="true"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="start" name="开始" type="START_EVENT">
+				<sc:StartEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- 原子变量填充到Bean -->
+						<sc:Input source="#deptName" target="#deptRequest.name"/>
+						<sc:Input source="#postName" target="#postRequest.name"/>
+						<sc:Input source="#userName" target="#userRequest.username"/>
+					</sc:DataMapping>
+				</sc:StartEvent>
+			</sc:Activity>
+			<sc:Activity id="createDept" name="创建部门" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="createDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- 必须指定beanClass -->
+						<sc:Input source="#deptRequest" target="#deptRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO"/>
+						<sc:Output source="#result" target="#deptId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 创建岗位：添加动态code生成 -->
+			<sc:Activity id="createPost" name="创建岗位" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="createPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="'POST_' + #postName" target="#postRequest.code"/>
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO"/>
+						<sc:Output source="#result" target="#postId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 创建用户：关键修复 - 使用SpEL字面量 -->
+			<sc:Activity id="createUser" name="创建用户" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="createUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- 修复：使用集合字面量 {#postId} -->
+						<sc:Input source="#userRequest.deptId = #deptId" target="#userRequest" dataType="bean"/>
+						<sc:Input source="#userRequest.postIds = {#postId}" target="#userRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#userId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 查询与结束 -->
+			<sc:Activity id="queryUser" name="查询用户详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="getUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userId" target="#userId" dataType="long"/>
+						<sc:Output source="#result" target="#userDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="queryDept" name="查询部门详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="getDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptId" target="#deptId" dataType="long"/>
+						<sc:Output source="#result" target="#deptDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="end" name="结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#userDetail" target="#result.user"/>
+						<sc:Output source="#deptDetail" target="#result.dept"/>
+						<sc:Output source="#postId" target="#result.postId"/>
+						<sc:Output source="#userId" target="#result.userId"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="t1" from="start" to="createDept"/>
+			<sc:Transition id="t2" from="createDept" to="createPost"/>
+			<sc:Transition id="t3" from="createPost" to="createUser"/>
+			<sc:Transition id="t4" from="createUser" to="queryUser"/>
+			<sc:Transition id="t5" from="queryUser" to="queryDept"/>
+			<sc:Transition id="t6" from="queryDept" to="end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+</sc:Package>

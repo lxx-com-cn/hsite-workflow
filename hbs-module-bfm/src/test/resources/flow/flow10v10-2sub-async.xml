@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" 
+            id="notification-async-dual" 
+            name="双异步通知编排" 
+            version="2.0.0" 
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- ==================== Main Workflow: 双ASYNC子流程 ==================== -->
+    <sc:Workflow id="main-async-dual-demo" name="主流程-双异步通知" version="2.0.0" type="MAIN" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptName" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="adminUserId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="adminEmail" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="deptId" type="long" direction="OUT"/>
+            <sc:Parameter name="notifyLogId" type="long" direction="OUT"/>
+            <sc:Parameter name="mailLogId" type="long" direction="OUT"/>
+            <sc:Parameter name="finalResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="dual-main-start" name="主流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 步骤1：创建部门（同步） -->
+            <sc:Activity id="dual-create-dept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" 
+                                  dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 步骤2：ASYNC子流程1 - 发送站内信（独立超时15秒） -->
+            <sc:Activity id="dual-async-notify" name="ASYNC子流程-站内信" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="notification-async-dual" workflowId="sub-async-notify-only" version="2.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long" required="true"/>
+                        <sc:Input source="#adminUserId" target="#userId" dataType="long" required="true"/>
+                        <!-- 站内信参数扁平化映射 -->
+                        <sc:Input source="'部门创建成功通知'" target="#notifyParams.title" dataType="string"/>
+                        <sc:Input source="'您好，新部门已成功创建，部门ID：' + #deptId" target="#notifyParams.content" dataType="string"/>
+                        <sc:Input source="#deptId" target="#notifyParams.bizId" dataType="long"/>
+                        <!-- 输出映射 -->
+                        <sc:Output source="#subResult.notifyLogId" target="#notifyLogId" dataType="long"/>
+                        <sc:Output source="#subResult.sendTime" target="#notifySendTime" dataType="long"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="ASYNC" timeout="15000">
+                        <sc:ThreadPool coreSize="2" maxSize="10" queueCapacity="50" threadNamePrefix="bfm-async-notify-"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 步骤3：ASYNC子流程2 - 发送邮件（独立超时15秒） -->
+            <sc:Activity id="dual-async-mail" name="ASYNC子流程-邮件" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="notification-async-dual" workflowId="sub-async-mail-only" version="2.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long" required="true"/>
+                        <sc:Input source="#adminUserId" target="#userId" dataType="long" required="true"/>
+                        <sc:Input source="#adminEmail" target="#email" dataType="string" required="true"/>
+                        <!-- 邮件参数扁平化映射 -->
+                        <sc:Input source="'部门创建邮件通知'" target="#mailParams.subject" dataType="string"/>
+                        <sc:Input source="'您负责的部门已创建，ID：' + #deptId + '，请及时查看。'" target="#mailParams.body" dataType="string"/>
+                        <sc:Input source="#deptId" target="#mailParams.bizId" dataType="long"/>
+                        <!-- 输出映射 -->
+                        <sc:Output source="#subResult.mailLogId" target="#mailLogId" dataType="long"/>
+                        <sc:Output source="#subResult.sendTime" target="#mailSendTime" dataType="long"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="ASYNC" timeout="15000">
+                        <sc:ThreadPool coreSize="2" maxSize="10" queueCapacity="50" threadNamePrefix="bfm-async-mail-"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 步骤4：主流程结束，直接组装最终结果（移除了冗余验证活动） -->
+            <sc:Activity id="dual-main-end" name="主流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptId" target="#finalResult.deptId" dataType="long"/>
+                        <sc:Output source="#notifyLogId" target="#finalResult.notifyLogId" dataType="long"/>
+                        <sc:Output source="#mailLogId" target="#finalResult.mailLogId" dataType="long"/>
+                        <sc:Output source="#notifySendTime" target="#finalResult.notifySendTime" dataType="long"/>
+                        <sc:Output source="#mailSendTime" target="#finalResult.mailSendTime" dataType="long"/>
+                        <sc:Output source="'双异步通知发送完成'" target="#finalResult.status" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="t1" from="dual-main-start" to="dual-create-dept"/>
+            <sc:Transition id="t2" from="dual-create-dept" to="dual-async-notify"/>
+            <sc:Transition id="t3" from="dual-async-notify" to="dual-async-mail"/>
+            <sc:Transition id="t4" from="dual-async-mail" to="dual-main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== ASYNC Sub Workflow 1: 仅站内信 ==================== -->
+    <sc:Workflow id="sub-async-notify-only" name="子流程-纯站内信异步" version="2.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="userId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="notifyParams" type="map" direction="IN"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="sub-notify-start" name="站内信子流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 真实站内信服务 -->
+            <sc:Activity id="sub-notify-send" name="发送站内信" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="notifySendService" method="sendSingleNotifyToAdmin"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Input source="'ASYNC_NOTIFY_TEMPLATE'" target="#templateCode" dataType="string"/>
+                        <sc:Input source="#notifyParams" target="#templateParams" dataType="map"/>
+                        <sc:Output source="#result" target="#notifyLogId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub-notify-end" name="站内信子流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#notifyLogId" target="#subResult.notifyLogId" dataType="long"/>
+                        <sc:Output source="#{ T(System).currentTimeMillis() }" target="#subResult.sendTime" dataType="long"/>
+                        <sc:Output source="'站内信异步发送成功'" target="#subResult.message" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="sn1" from="sub-notify-start" to="sub-notify-send"/>
+            <sc:Transition id="sn2" from="sub-notify-send" to="sub-notify-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== ASYNC Sub Workflow 2: 仅邮件 ==================== -->
+    <sc:Workflow id="sub-async-mail-only" name="子流程-纯邮件异步" version="2.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="userId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="email" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="mailParams" type="map" direction="IN"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="sub-mail-start" name="邮件子流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 真实邮件服务（注意方法签名） -->
+            <sc:Activity id="sub-mail-send" name="发送邮件" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="mailSendService" method="sendSingleMail"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 单个邮箱自动转换为单元素 Set -->
+                        <sc:Input source="#email" target="#toMails" dataType="set" beanClass="java.lang.String"/>
+                        <sc:Input source="null" target="#ccMails" dataType="set"/>
+                        <sc:Input source="null" target="#bccMails" dataType="set"/>
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <!-- 用户类型：2 代表管理员 -->
+                        <sc:Input source="2" target="#userType" dataType="int"/>
+                        <sc:Input source="'ASYNC_MAIL_TEMPLATE'" target="#templateCode" dataType="string"/>
+                        <sc:Input source="#mailParams" target="#templateParams" dataType="map"/>
+                        <sc:Output source="#result" target="#mailLogId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub-mail-end" name="邮件子流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#mailLogId" target="#subResult.mailLogId" dataType="long"/>
+                        <sc:Output source="#{ T(System).currentTimeMillis() }" target="#subResult.sendTime" dataType="long"/>
+                        <sc:Output source="'邮件异步发送成功'" target="#subResult.message" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="sm1" from="sub-mail-start" to="sub-mail-send"/>
+            <sc:Transition id="sm2" from="sub-mail-send" to="sub-mail-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

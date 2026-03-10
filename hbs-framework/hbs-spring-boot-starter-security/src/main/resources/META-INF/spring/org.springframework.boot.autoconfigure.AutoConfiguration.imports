@@ -1,0 +1,3 @@
+com.hbs.site.framework.security.config.HbsSecurityAutoConfiguration
+com.hbs.site.framework.security.config.HbsWebSecurityConfigurerAdapter
+com.hbs.site.framework.operatelog.config.HbsOperateLogConfiguration

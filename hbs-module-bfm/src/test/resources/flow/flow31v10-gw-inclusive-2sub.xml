@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography"
+            id="inclusive-2sub-demo"
+            name="包容网关-双子流程示例"
+            version="1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- ==================== 主流程：包容网关 ==================== -->
+    <sc:Workflow id="inclusive-main" name="主流程-包容网关" version="1.0.0" type="MAIN" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="flags" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="false"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="false"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="false"/>
+            <sc:Parameter name="subFlags1" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="subFlags2" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="result" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 主流程包容网关 SPLIT -->
+            <sc:Activity id="main-SPLIT" name="主流程分支开始" type="INCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <!-- 分支A：创建部门 -->
+            <sc:Activity id="main-createDept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean" required="true"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 分支B：创建岗位 -->
+            <sc:Activity id="main-createPost" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean" required="true"/>
+                        <sc:Output source="#result" target="#postId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 分支C：创建用户 -->
+            <sc:Activity id="main-createUser" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean" required="true"/>
+                        <sc:Output source="#result" target="#userId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 默认分支 -->
+            <sc:Activity id="main-default" name="主流程默认分支" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'MAIN_DEFAULT'" target="#arg0"/>
+                        <sc:Output source="#result" target="#mainDefaultFlag"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 主流程包容网关 JOIN -->
+            <sc:Activity id="main-JOIN" name="主流程分支汇聚" type="INCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <!-- 调用子流程1 -->
+            <sc:Activity id="main-subProcess1" name="调用子流程1" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="inclusive-2sub-demo" workflowId="sub-process1" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#subFlags1" target="#subFlagsParam" dataType="string"/>
+                        <sc:Output source="#subResult.subA" target="#sub1A"/>
+                        <sc:Output source="#subResult.subB" target="#sub1B"/>
+                        <sc:Output source="#subResult.subC" target="#sub1C"/>
+                        <sc:Output source="#subResult.subDefault" target="#sub1Default"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 调用子流程2 -->
+            <sc:Activity id="main-subProcess2" name="调用子流程2" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="inclusive-2sub-demo" workflowId="sub-process2" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#subFlags2" target="#subFlagsParam" dataType="string"/>
+                        <sc:Output source="#subResult.subA" target="#sub2A"/>
+                        <sc:Output source="#subResult.subB" target="#sub2B"/>
+                        <sc:Output source="#subResult.subC" target="#sub2C"/>
+                        <sc:Output source="#subResult.subDefault" target="#sub2Default"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 结束事件 -->
+            <sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptId != null ? 'A' : null" target="#result.mainA"/>
+                        <sc:Output source="#postId != null ? 'B' : null" target="#result.mainB"/>
+                        <sc:Output source="#userId != null ? 'C' : null" target="#result.mainC"/>
+                        <sc:Output source="#mainDefaultFlag != null ? 'D' : null" target="#result.mainD"/>
+                        <sc:Output source="#sub1A != null ? 'A' : null" target="#result.sub1A"/>
+                        <sc:Output source="#sub1B != null ? 'B' : null" target="#result.sub1B"/>
+                        <sc:Output source="#sub1C != null ? 'C' : null" target="#result.sub1C"/>
+                        <sc:Output source="#sub1Default != null ? 'D' : null" target="#result.sub1D"/>
+                        <sc:Output source="#sub2A != null ? 'A' : null" target="#result.sub2A"/>
+                        <sc:Output source="#sub2B != null ? 'B' : null" target="#result.sub2B"/>
+                        <sc:Output source="#sub2C != null ? 'C' : null" target="#result.sub2C"/>
+                        <sc:Output source="#sub2Default != null ? 'D' : null" target="#result.sub2D"/>
+                        <sc:Output source="#deptId" target="#result.deptId"/>
+                        <sc:Output source="#postId" target="#result.postId"/>
+                        <sc:Output source="#userId" target="#result.userId"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="t-start-split" from="main-start" to="main-SPLIT"/>
+
+            <sc:Transition id="t-split-dept" from="main-SPLIT" to="main-createDept" condition="#flags.contains('A')" priority="10"/>
+            <sc:Transition id="t-split-post" from="main-SPLIT" to="main-createPost" condition="#flags.contains('B')" priority="9"/>
+            <sc:Transition id="t-split-user" from="main-SPLIT" to="main-createUser" condition="#flags.contains('C')" priority="8"/>
+            <sc:Transition id="t-split-default" from="main-SPLIT" to="main-default" default="true" priority="1"/>
+
+            <sc:Transition id="t-dept-join" from="main-createDept" to="main-JOIN"/>
+            <sc:Transition id="t-post-join" from="main-createPost" to="main-JOIN"/>
+            <sc:Transition id="t-user-join" from="main-createUser" to="main-JOIN"/>
+            <sc:Transition id="t-default-join" from="main-default" to="main-JOIN"/>
+
+            <sc:Transition id="t-join-sub1" from="main-JOIN" to="main-subProcess1"/>
+            <sc:Transition id="t-sub1-sub2" from="main-subProcess1" to="main-subProcess2"/>
+            <sc:Transition id="t-sub2-end" from="main-subProcess2" to="main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 子流程1：基础操作 ==================== -->
+    <sc:Workflow id="sub-process1" name="子流程1-基础操作" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="subFlagsParam" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="sub1-start" name="子流程1开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <sc:Activity id="sub1-SPLIT" name="子流程1分支开始" type="INCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <sc:Activity id="sub1-log" name="记录日志" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'LOG_EXECUTED'" target="#arg0"/>
+                        <sc:Output source="#result" target="#subA"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub1-notify" name="发送通知" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'NOTIFY_EXECUTED'" target="#arg0"/>
+                        <sc:Output source="#result" target="#subB"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub1-cache" name="更新缓存" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'CACHE_EXECUTED'" target="#arg0"/>
+                        <sc:Output source="#result" target="#subC"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub1-default" name="子流程1默认分支" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'SUB1_DEFAULT'" target="#arg0"/>
+                        <sc:Output source="#result" target="#subDefault"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub1-JOIN" name="子流程1分支汇聚" type="INCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <sc:Activity id="sub1-end" name="子流程1结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#subA" target="#subResult.subA"/>
+                        <sc:Output source="#subB" target="#subResult.subB"/>
+                        <sc:Output source="#subC" target="#subResult.subC"/>
+                        <sc:Output source="#subDefault" target="#subResult.subDefault"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="s1-start-split" from="sub1-start" to="sub1-SPLIT"/>
+            <sc:Transition id="s1-split-log" from="sub1-SPLIT" to="sub1-log" condition="#subFlagsParam.contains('A')" priority="10"/>
+            <sc:Transition id="s1-split-notify" from="sub1-SPLIT" to="sub1-notify" condition="#subFlagsParam.contains('B')" priority="9"/>
+            <sc:Transition id="s1-split-cache" from="sub1-SPLIT" to="sub1-cache" condition="#subFlagsParam.contains('C')" priority="8"/>
+            <sc:Transition id="s1-split-default" from="sub1-SPLIT" to="sub1-default" default="true" priority="1"/>
+            <sc:Transition id="s1-log-join" from="sub1-log" to="sub1-JOIN"/>
+            <sc:Transition id="s1-notify-join" from="sub1-notify" to="sub1-JOIN"/>
+            <sc:Transition id="s1-cache-join" from="sub1-cache" to="sub1-JOIN"/>
+            <sc:Transition id="s1-default-join" from="sub1-default" to="sub1-JOIN"/>
+            <sc:Transition id="s1-join-end" from="sub1-JOIN" to="sub1-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 子流程2：通知操作 ==================== -->
+    <sc:Workflow id="sub-process2" name="子流程2-通知操作" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="subFlagsParam" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="sub2-start" name="子流程2开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <sc:Activity id="sub2-SPLIT" name="子流程2分支开始" type="INCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <sc:Activity id="sub2-sms" name="发送短信" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'SMS_EXECUTED'" target="#arg0"/>
+                        <sc:Output source="#result" target="#subA"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub2-email" name="发送邮件" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'EMAIL_EXECUTED'" target="#arg0"/>
+                        <sc:Output source="#result" target="#subB"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub2-push" name="发送推送" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'PUSH_EXECUTED'" target="#arg0"/>
+                        <sc:Output source="#result" target="#subC"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub2-default" name="子流程2默认分支" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'SUB2_DEFAULT'" target="#arg0"/>
+                        <sc:Output source="#result" target="#subDefault"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub2-JOIN" name="子流程2分支汇聚" type="INCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <sc:Activity id="sub2-end" name="子流程2结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#subA" target="#subResult.subA"/>
+                        <sc:Output source="#subB" target="#subResult.subB"/>
+                        <sc:Output source="#subC" target="#subResult.subC"/>
+                        <sc:Output source="#subDefault" target="#subResult.subDefault"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="s2-start-split" from="sub2-start" to="sub2-SPLIT"/>
+            <sc:Transition id="s2-split-sms" from="sub2-SPLIT" to="sub2-sms" condition="#subFlagsParam.contains('A')" priority="10"/>
+            <sc:Transition id="s2-split-email" from="sub2-SPLIT" to="sub2-email" condition="#subFlagsParam.contains('B')" priority="9"/>
+            <sc:Transition id="s2-split-push" from="sub2-SPLIT" to="sub2-push" condition="#subFlagsParam.contains('C')" priority="8"/>
+            <sc:Transition id="s2-split-default" from="sub2-SPLIT" to="sub2-default" default="true" priority="1"/>
+            <sc:Transition id="s2-sms-join" from="sub2-sms" to="sub2-JOIN"/>
+            <sc:Transition id="s2-email-join" from="sub2-email" to="sub2-JOIN"/>
+            <sc:Transition id="s2-push-join" from="sub2-push" to="sub2-JOIN"/>
+            <sc:Transition id="s2-default-join" from="sub2-default" to="sub2-JOIN"/>
+            <sc:Transition id="s2-join-end" from="sub2-JOIN" to="sub2-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

@@ -1,0 +1,7 @@
+com.hbs.site.framework.apilog.config.HbsApiLogAutoConfiguration
+com.hbs.site.framework.jackson.config.HbsJacksonAutoConfiguration
+com.hbs.site.framework.swagger.config.HbsSwaggerAutoConfiguration
+com.hbs.site.framework.web.config.HbsWebAutoConfiguration
+com.hbs.site.framework.xss.config.HbsXssAutoConfiguration
+com.hbs.site.framework.banner.config.HbsBannerAutoConfiguration
+com.hbs.site.framework.encrypt.config.HbsApiEncryptAutoConfiguration

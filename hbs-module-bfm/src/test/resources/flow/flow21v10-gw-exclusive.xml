@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" 
+            id="user-type-gateway-demo" 
+            name="用户类型网关示例" 
+            version="1.0.0" 
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <sc:Workflow id="user-init-process" name="用户初始化流程" version="1.0.0" type="MAIN" contractMode="STRICT" expressionLanguage="SpEL">
+        <sc:Parameters>
+            <!-- 输入参数：完整VO对象 -->
+            <sc:Parameter name="userType" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="false"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="false"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+
+            <!-- 输出参数 -->
+            <sc:Parameter name="executedStrategy" type="string" direction="OUT"/>
+            <sc:Parameter name="deptId" type="long" direction="OUT"/>
+            <sc:Parameter name="postId" type="long" direction="OUT"/>
+            <sc:Parameter name="userId" type="long" direction="OUT"/>
+            <sc:Parameter name="userDetail" type="bean" className="com.hbs.site.module.system.dal.dataobject.user.AdminUserDO" direction="OUT"/>
+            <sc:Parameter name="deptUsers" type="list" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <!-- 开始事件 -->
+            <sc:Activity id="start" name="开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- ==================== 排他网关：用户类型判断 ==================== -->
+            <sc:Activity id="gatewayUserType" name="用户类型判断网关" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <!-- ==================== 分支1：VIP用户（完整流程） ==================== -->
+            <sc:Activity id="vipCreateDept" name="VIP-创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 直接传递整个 deptRequest VO 对象 -->
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="vipCreatePost" name="VIP-创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 直接传递整个 postRequest VO 对象 -->
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#postId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="vipCreateUser" name="VIP-创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 直接传递整个 userRequest VO 对象，并补充 deptId 和 postIds -->
+                        <sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+                        <sc:Input source="{#postId}" target="#userRequest.postIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#userId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="vipQueryUser" name="VIP-查询用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#userDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- VIP分支结束：标记策略 -->
+            <sc:Activity id="vipEndMark" name="VIP流程完成" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'VIP_FULL'" target="#arg0" dataType="string"/>
+                        <sc:Output source="#result" target="#executedStrategy"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- ==================== 分支2：普通用户（仅创建用户） ==================== -->
+            <sc:Activity id="normalCreateUser" name="普通-创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 直接传递整个 userRequest VO 对象（无需 deptId/postIds） -->
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#userId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="normalQueryUser" name="普通-查询用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#userDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 普通分支结束：标记策略 -->
+            <sc:Activity id="normalEndMark" name="普通流程完成" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'NORMAL_SIMPLE'" target="#arg0" dataType="string"/>
+                        <sc:Output source="#result" target="#executedStrategy"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- ==================== 分支3：企业用户（部门+批量用户） ==================== -->
+            <sc:Activity id="enterpriseCreateDept" name="企业-创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 直接传递整个 deptRequest VO 对象 -->
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="enterpriseCreateUser" name="企业-创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 直接传递整个 userRequest VO 对象，并补充 deptId -->
+                        <sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#userId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="enterpriseQueryDeptUsers" name="企业-查询部门用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUserListByDeptIds"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="{#deptId}" target="#deptIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Output source="#result" target="#deptUsers"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 企业分支结束：标记策略 -->
+            <sc:Activity id="enterpriseEndMark" name="企业流程完成" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'ENTERPRISE_DEPT'" target="#arg0" dataType="string"/>
+                        <sc:Output source="#result" target="#executedStrategy"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- ==================== 合并点（排他网关JOIN） ==================== -->
+            <sc:Activity id="mergeGateway" name="分支合并" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <!-- 结束事件 -->
+            <sc:Activity id="end" name="结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#executedStrategy" target="#finalStrategy"/>
+                        <sc:Output source="#userId" target="#finalUserId"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <!-- 开始 -> 网关 -->
+            <sc:Transition id="t1" from="start" to="gatewayUserType"/>
+
+            <!-- ==================== 排他网关出栈：条件分支 ==================== -->
+            <!-- 条件1：VIP用户（最高优先级） -->
+            <sc:Transition id="t-vip" from="gatewayUserType" to="vipCreateDept" condition="#userType == 'VIP'" priority="10"/>
+            <!-- 条件2：企业用户 -->
+            <sc:Transition id="t-enterprise" from="gatewayUserType" to="enterpriseCreateDept" condition="#userType == 'ENTERPRISE'" priority="5"/>
+            <!-- 条件3：普通用户（作为默认兜底，default="true"） -->
+            <sc:Transition id="t-normal" from="gatewayUserType" to="normalCreateUser" default="true" priority="1"/>
+
+            <!-- ==================== VIP分支内部流转 ==================== -->
+            <sc:Transition id="t-vip-1" from="vipCreateDept" to="vipCreatePost"/>
+            <sc:Transition id="t-vip-2" from="vipCreatePost" to="vipCreateUser"/>
+            <sc:Transition id="t-vip-3" from="vipCreateUser" to="vipQueryUser"/>
+            <sc:Transition id="t-vip-4" from="vipQueryUser" to="vipEndMark"/>
+            <sc:Transition id="t-vip-5" from="vipEndMark" to="mergeGateway"/>
+
+            <!-- ==================== 普通分支内部流转 ==================== -->
+            <sc:Transition id="t-normal-1" from="normalCreateUser" to="normalQueryUser"/>
+            <sc:Transition id="t-normal-2" from="normalQueryUser" to="normalEndMark"/>
+            <sc:Transition id="t-normal-3" from="normalEndMark" to="mergeGateway"/>
+
+            <!-- ==================== 企业分支内部流转 ==================== -->
+            <sc:Transition id="t-ent-1" from="enterpriseCreateDept" to="enterpriseCreateUser"/>
+            <sc:Transition id="t-ent-2" from="enterpriseCreateUser" to="enterpriseQueryDeptUsers"/>
+            <sc:Transition id="t-ent-3" from="enterpriseQueryDeptUsers" to="enterpriseEndMark"/>
+            <sc:Transition id="t-ent-4" from="enterpriseEndMark" to="mergeGateway"/>
+
+            <!-- 合并 -> 结束 -->
+            <sc:Transition id="t-end" from="mergeGateway" to="end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

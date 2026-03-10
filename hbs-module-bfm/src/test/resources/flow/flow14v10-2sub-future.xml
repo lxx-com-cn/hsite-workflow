@@ -1,0 +1,358 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" 
+            id="dual-future-demo-pkg" 
+            name="双FUTURE模式演示包" 
+            version="1.0.0" 
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- ==================== 主流程：双FUTURE子流程顺序编排 ==================== -->
+    <sc:Workflow id="main-dual-future-demo" name="主流程-双FUTURE并发依赖" version="1.0.0" type="MAIN" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="postId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="deptIdForQuery" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="roleId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="result" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="main-start" name="开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="create-dept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="future-sub-1" name="FUTURE子流程-通知服务" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="dual-future-demo-pkg" workflowId="sub-future-notify" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#subResult.userInfo" target="#userInfo"/>
+                        <sc:Output source="#subResult.postInfo" target="#postInfo"/>
+                        <sc:Output source="#subResult.notifyResult" target="#notifyResult" dataType="long"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="FUTURE" timeout="15000">
+                        <sc:FutureConfig dependencyType="ALL"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="future-sub-2" name="FUTURE子流程-邮件服务" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="dual-future-demo-pkg" workflowId="sub-future-mail" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptIdForQuery" target="#deptId" dataType="long"/>
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#subResult.deptInfo" target="#deptInfo"/>
+                        <sc:Output source="#subResult.roleInfo" target="#roleInfo"/>
+                        <sc:Output source="#subResult.mailResult" target="#mailResult" dataType="long"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="FUTURE" timeout="15000">
+                        <sc:FutureConfig dependencyType="ALL"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-end" name="结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptId" target="#result.deptId" dataType="long"/>
+                        <sc:Output source="#userInfo" target="#result.userInfo"/>
+                        <sc:Output source="#postInfo" target="#result.postInfo"/>
+                        <sc:Output source="#notifyResult" target="#result.notifyResult" dataType="long"/>
+                        <sc:Output source="#deptInfo" target="#result.deptInfo"/>
+                        <sc:Output source="#roleInfo" target="#result.roleInfo"/>
+                        <sc:Output source="#mailResult" target="#result.mailResult" dataType="long"/>
+                        <sc:Output source="'SUCCESS'" target="#result.status" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="t1" from="main-start" to="create-dept"/>
+            <sc:Transition id="t2" from="create-dept" to="future-sub-1"/>
+            <sc:Transition id="t3" from="future-sub-1" to="future-sub-2"/>
+            <sc:Transition id="t4" from="future-sub-2" to="main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 子流程1：通知服务 ==================== -->
+    <sc:Workflow id="sub-future-notify" name="子流程-FUTURE通知服务" version="1.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="userId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="postId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="sub1-start" name="开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="query-user" name="查询用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="LOCAL">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#userInfo"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="query-post" name="查询岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="LOCAL">
+                        <sc:Input source="#postId" target="#id" dataType="long"/>
+                        <sc:Output source="#result" target="#postInfo"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="send-notify" name="发送合并通知" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="notifySendService" method="sendSingleNotifyToAdmin"/>
+                    <sc:DataMapping scope="LOCAL">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Input source="'OUTER_ASYNC_NOTIFY_TEMPLATE'" target="#templateCode" dataType="string"/>
+                        <sc:Input source="#{ {'title':'用户岗位通知', 'content':'用户：' + #userInfo.nickname + '，岗位：' + #postInfo.name} }" target="#templateParams" dataType="map"/>
+                        <sc:Output source="#result" target="#notifyResult" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="sub1-end" name="结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#userInfo" target="#subResult.userInfo"/>
+                        <sc:Output source="#postInfo" target="#subResult.postInfo"/>
+                        <sc:Output source="#notifyResult" target="#subResult.notifyResult" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="s1-c1" from="sub1-start" to="query-user"/>
+            <sc:Transition id="s1-c2" from="sub1-start" to="query-post"/>
+            <sc:Transition id="s1-c3" from="query-user" to="send-notify"/>
+            <sc:Transition id="s1-c4" from="query-post" to="send-notify"/>
+            <sc:Transition id="s1-c5" from="send-notify" to="sub1-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 子流程2：邮件服务（修正版：添加bizId参数） ==================== -->
+    <sc:Workflow id="sub-future-mail" name="子流程-FUTURE邮件服务" version="1.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="roleId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="sub2-start" name="开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="query-dept" name="查询部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="getDept"/>
+                    <sc:DataMapping scope="LOCAL">
+                        <sc:Input source="#deptId" target="#id" dataType="long"/>
+                        <sc:Output source="#result" target="#deptInfo"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="query-role" name="查询角色" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="getRole"/>
+                    <sc:DataMapping scope="LOCAL">
+                        <sc:Input source="#roleId" target="#id" dataType="long"/>
+                        <sc:Output source="#result" target="#roleInfo"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="send-mail" name="发送部门角色邮件" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="mailSendService" method="sendSingleMail"/>
+                    <sc:DataMapping scope="LOCAL">
+                        <sc:Input source="#{ 'admin@hbs.com' }" target="#toMails" dataType="set" beanClass="java.lang.String"/>
+                        <sc:Input source="null" target="#ccMails" dataType="set"/>
+                        <sc:Input source="null" target="#bccMails" dataType="set"/>
+                        <sc:Input source="1" target="#userId" dataType="long"/>
+                        <sc:Input source="2" target="#userType" dataType="int"/>
+                        <sc:Input source="'OUTER_ASYNC_MAIL_TEMPLATE'" target="#templateCode" dataType="string"/>
+                        <!-- ✅ 添加bizId参数，使用deptId作为业务标识 -->
+                        <sc:Input source="#{ {'subject':'部门角色通知', 'body':'部门：' + #deptInfo.name + '，角色：' + #roleInfo.name, 'bizId':#deptId} }" target="#templateParams" dataType="map"/>
+                        <sc:Output source="#result" target="#mailResult" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="sub2-end" name="结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptInfo" target="#subResult.deptInfo"/>
+                        <sc:Output source="#roleInfo" target="#subResult.roleInfo"/>
+                        <sc:Output source="#mailResult" target="#subResult.mailResult" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="s2-c1" from="sub2-start" to="query-dept"/>
+            <sc:Transition id="s2-c2" from="sub2-start" to="query-role"/>
+            <sc:Transition id="s2-c3" from="query-dept" to="send-mail"/>
+            <sc:Transition id="s2-c4" from="query-role" to="send-mail"/>
+            <sc:Transition id="s2-c5" from="send-mail" to="sub2-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 初始化流程（与之前相同） ==================== -->
+    <sc:Workflow id="init-test-user" name="初始化-创建测试用户" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="username" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="nickname" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="password" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="mobile" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="email" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="userId" type="long" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="initUser-start" name="初始化开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="initUser-create" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#username" target="#userRequest.username" dataType="string"/>
+                        <sc:Input source="#nickname" target="#userRequest.nickname" dataType="string"/>
+                        <sc:Input source="#password" target="#userRequest.password" dataType="string"/>
+                        <sc:Input source="1" target="#userRequest.sex" dataType="int"/>
+                        <sc:Input source="#mobile" target="#userRequest.mobile" dataType="string"/>
+                        <sc:Input source="#email" target="#userRequest.email" dataType="string"/>
+                        <sc:Input source="0" target="#userRequest.status" dataType="int"/>
+                        <sc:Output source="#result" target="#userId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="initUser-end" name="初始化结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#userId" target="#userId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="iu1" from="initUser-start" to="initUser-create"/>
+            <sc:Transition id="iu2" from="initUser-create" to="initUser-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <sc:Workflow id="init-test-post" name="初始化-创建测试岗位" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="name" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="code" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="postId" type="long" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="initPost-start" name="初始化开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="initPost-create" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#name" target="#postRequest.name" dataType="string"/>
+                        <sc:Input source="#code" target="#postRequest.code" dataType="string"/>
+                        <sc:Input source="0" target="#postRequest.status" dataType="int"/>
+                        <sc:Input source="999" target="#postRequest.sort" dataType="int"/>
+                        <sc:Output source="#result" target="#postId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="initPost-end" name="初始化结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#postId" target="#postId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="ip1" from="initPost-start" to="initPost-create"/>
+            <sc:Transition id="ip2" from="initPost-create" to="initPost-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <sc:Workflow id="init-test-dept" name="初始化-创建测试部门" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="name" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="deptId" type="long" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="initDept-start" name="初始化开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="initDept-create" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#name" target="#deptRequest.name" dataType="string"/>
+                        <sc:Input source="0" target="#deptRequest.status" dataType="int"/>
+                        <sc:Input source="0" target="#deptRequest.parentId" dataType="long"/>
+                        <sc:Input source="999" target="#deptRequest.sort" dataType="int"/>
+                        <sc:Output source="#result" target="#deptId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="initDept-end" name="初始化结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptId" target="#deptId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="id1" from="initDept-start" to="initDept-create"/>
+            <sc:Transition id="id2" from="initDept-create" to="initDept-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <sc:Workflow id="init-test-role" name="初始化-创建测试角色" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="name" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="code" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="roleId" type="long" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="initRole-start" name="初始化开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="initRole-create" name="创建角色" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="createRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#name" target="#roleRequest.name" dataType="string"/>
+                        <sc:Input source="#code" target="#roleRequest.code" dataType="string"/>
+                        <sc:Input source="999" target="#roleRequest.sort" dataType="int"/>
+                        <sc:Input source="0" target="#roleRequest.status" dataType="int"/>
+                        <sc:Input source="1" target="#type" dataType="int"/>
+                        <sc:Output source="#result" target="#roleId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="initRole-end" name="初始化结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#roleId" target="#roleId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="ir1" from="initRole-start" to="initRole-create"/>
+            <sc:Transition id="ir2" from="initRole-create" to="initRole-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

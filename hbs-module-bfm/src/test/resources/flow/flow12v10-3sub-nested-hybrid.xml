@@ -1,0 +1,410 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" 
+            id="org-hybrid-3sub-mixed" 
+            name="三子流程混合嵌套验证" 
+            version="8.0.0" 
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- ==================== Main Workflow: 三模式混合主流程 ==================== -->
+    <sc:Workflow id="main-hybrid-3sub-process" name="主流程-SYNC/TX/ASYNC三模式混合" version="8.0.0" type="MAIN" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <!-- 异常触发标记：使用字符串标记，由测试类在调用前设置 -->
+            <sc:Parameter name="triggerSyncInnerFail" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="triggerTxInnerFail" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="triggerAsyncInnerTxFail" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="hybridResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 分支1：SYNC子流程（创建部门 + 内层Async站内信） -->
+            <sc:Activity id="main-sync-async-branch" name="SYNC子流程-含内层Async" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-hybrid-3sub-mixed" workflowId="outer-sync-async-process" version="8.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Input source="#triggerSyncInnerFail" target="#triggerInnerFail" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.deptId" target="#deptId" dataType="long"/>
+                        <sc:Output source="#subResult.notifyLogId" target="#notifyLogId" dataType="long"/>
+                        <sc:Output source="#subResult.branch1Msg" target="#branch1Msg" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 分支2：TX子流程（创建岗位 + 内层Async邮件） -->
+            <sc:Activity id="main-tx-async-branch" name="TX子流程-含内层Async" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-hybrid-3sub-mixed" workflowId="outer-tx-async-process" version="8.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#triggerTxInnerFail" target="#triggerInnerFail" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#subResult.mailLogId" target="#mailLogId" dataType="long"/>
+                        <sc:Output source="#subResult.branch2Msg" target="#branch2Msg" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="TX" timeout="60000">
+                        <sc:TransactionConfig propagation="REQUIRES_NEW" isolation="READ_COMMITTED" timeout="60" rollbackFor="java.lang.RuntimeException,java.lang.Exception"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 分支3：Async子流程（创建用户 + 内层TX角色） -->
+            <sc:Activity id="main-async-tx-branch" name="ASYNC子流程-含内层TX" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-hybrid-3sub-mixed" workflowId="outer-async-tx-process" version="8.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Input source="#triggerAsyncInnerTxFail" target="#triggerInnerTxFail" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#subResult.branch3Msg" target="#branch3Msg" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="ASYNC" timeout="45000">
+                        <sc:ThreadPool coreSize="3" maxSize="15" queueCapacity="100" threadNamePrefix="bfm-outer-async-tx-"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <!-- 移除验证活动，直接在EndEvent中组装结果 -->
+            <sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptId" target="#hybridResult.deptId" dataType="long"/>
+                        <sc:Output source="#notifyLogId" target="#hybridResult.notifyLogId" dataType="long"/>
+                        <sc:Output source="#postId" target="#hybridResult.postId" dataType="long"/>
+                        <sc:Output source="#mailLogId" target="#hybridResult.mailLogId" dataType="long"/>
+                        <sc:Output source="#userId" target="#hybridResult.userId" dataType="long"/>
+                        <sc:Output source="#roleId" target="#hybridResult.roleId" dataType="long"/>
+                        <sc:Output source="#branch1Msg" target="#hybridResult.branch1Msg" dataType="string"/>
+                        <sc:Output source="#branch2Msg" target="#hybridResult.branch2Msg" dataType="string"/>
+                        <sc:Output source="#branch3Msg" target="#hybridResult.branch3Msg" dataType="string"/>
+                        <sc:Output source="'HYBRID_3SUB_SUCCESS'" target="#hybridResult.status" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="t1" from="main-start" to="main-sync-async-branch"/>
+            <sc:Transition id="t2" from="main-sync-async-branch" to="main-tx-async-branch"/>
+            <sc:Transition id="t3" from="main-tx-async-branch" to="main-async-tx-branch"/>
+            <sc:Transition id="t4" from="main-async-tx-branch" to="main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== Branch 1: SYNC子流程（外层SYNC，内层Async站内信） ==================== -->
+    <sc:Workflow id="outer-sync-async-process" name="外层SYNC子流程-含内层Async" version="8.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="triggerInnerFail" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="syncAsync-start" name="SYNC+ASYNC开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 创建部门（同步） -->
+            <sc:Activity id="syncAsync-createDept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 内层Async子流程：发送站内信 -->
+            <sc:Activity id="syncAsync-inner-notify" name="内层ASYNC-站内信" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-hybrid-3sub-mixed" workflowId="inner-async-notify-process" version="8.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#bizId" dataType="long"/>
+                        <sc:Input source="#triggerInnerFail" target="#triggerFail" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.notifyLogId" target="#notifyLogId" dataType="long"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="ASYNC" timeout="15000">
+                        <sc:ThreadPool coreSize="2" maxSize="10" queueCapacity="50" threadNamePrefix="bfm-inner-notify-"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <sc:Activity id="syncAsync-end" name="SYNC+ASYNC结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptId" target="#subResult.deptId" dataType="long"/>
+                        <sc:Output source="#notifyLogId" target="#subResult.notifyLogId" dataType="long"/>
+                        <sc:Output source="'SYNC_OUTER_ASYNC_INNER_SUCCESS'" target="#subResult.branch1Msg" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="sat1" from="syncAsync-start" to="syncAsync-createDept"/>
+            <sc:Transition id="sat2" from="syncAsync-createDept" to="syncAsync-inner-notify"/>
+            <sc:Transition id="sat3" from="syncAsync-inner-notify" to="syncAsync-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- 内层Async站内信子流程 -->
+    <sc:Workflow id="inner-async-notify-process" name="内层Async-站内信" version="8.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="bizId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="triggerFail" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="innerNotify-start" name="异步站内信开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <sc:Activity id="innerNotify-send" name="发送站内信" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <!-- 使用真实站内信服务 -->
+                    <sc:SpringBean beanName="notifySendService" method="sendSingleNotifyToAdmin"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 固定使用 adminUserId=1 -->
+                        <sc:Input source="1" target="#userId" dataType="long"/>
+                        <!-- 模板编码：正常使用 'OUTER_ASYNC_NOTIFY_TEMPLATE'，若触发失败则使用不存在的模板 -->
+                        <sc:Input source="#{ #triggerFail == 'true' ? 'NOT_EXIST_TEMPLATE' : 'OUTER_ASYNC_NOTIFY_TEMPLATE' }" target="#templateCode" dataType="string"/>
+                        <!-- 构造模板参数 -->
+                        <sc:Input source="#{ {'bizId': #bizId, 'title':'部门创建成功','content':'部门ID：' + #bizId} }" target="#templateParams" dataType="map"/>
+                        <sc:Output source="#result" target="#notifyLogId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="innerNotify-end" name="异步站内信结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#notifyLogId" target="#subResult.notifyLogId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="int1" from="innerNotify-start" to="innerNotify-send"/>
+            <sc:Transition id="int2" from="innerNotify-send" to="innerNotify-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== Branch 2: TX子流程（外层TX，内层Async邮件） ==================== -->
+    <sc:Workflow id="outer-tx-async-process" name="外层TX子流程-含内层Async" version="8.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="triggerInnerFail" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="txAsync-start" name="TX+ASYNC开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 创建岗位（在TX事务内） -->
+            <sc:Activity id="txAsync-createPost" name="创建岗位(TX内)" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#postId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 内层Async子流程：发送邮件 -->
+            <sc:Activity id="txAsync-inner-mail" name="内层ASYNC-邮件" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-hybrid-3sub-mixed" workflowId="inner-async-mail-process" version="8.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#bizId" dataType="long"/>
+                        <sc:Input source="#triggerInnerFail" target="#triggerFail" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.mailLogId" target="#mailLogId" dataType="long"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="ASYNC" timeout="15000">
+                        <sc:ThreadPool coreSize="2" maxSize="10" queueCapacity="50" threadNamePrefix="bfm-inner-mail-"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <sc:Activity id="txAsync-end" name="TX+ASYNC结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#postId" target="#subResult.postId" dataType="long"/>
+                        <sc:Output source="#mailLogId" target="#subResult.mailLogId" dataType="long"/>
+                        <sc:Output source="'TX_OUTER_ASYNC_INNER_SUCCESS'" target="#subResult.branch2Msg" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="tat1" from="txAsync-start" to="txAsync-createPost"/>
+            <sc:Transition id="tat2" from="txAsync-createPost" to="txAsync-inner-mail"/>
+            <sc:Transition id="tat3" from="txAsync-inner-mail" to="txAsync-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- 内层Async邮件子流程 -->
+    <sc:Workflow id="inner-async-mail-process" name="内层Async-邮件" version="8.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="bizId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="triggerFail" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="innerMail-start" name="异步邮件开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <sc:Activity id="innerMail-send" name="发送邮件" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="mailSendService" method="sendSingleMail"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 收件人：使用管理员邮箱，从变量获取 -->
+                        <sc:Input source="#{ {'admin@hbs.com'} }" target="#toMails" dataType="set" beanClass="java.lang.String"/>
+                        <sc:Input source="null" target="#ccMails" dataType="set"/>
+                        <sc:Input source="null" target="#bccMails" dataType="set"/>
+                        <sc:Input source="1" target="#userId" dataType="long"/>
+                        <sc:Input source="2" target="#userType" dataType="int"/>
+                        <!-- 模板编码：正常使用 'OUTER_ASYNC_MAIL_TEMPLATE'，失败时使用不存在模板 -->
+                        <sc:Input source="#{ #triggerFail == 'true' ? 'NOT_EXIST_MAIL_TEMPLATE' : 'OUTER_ASYNC_MAIL_TEMPLATE' }" target="#templateCode" dataType="string"/>
+                        <!-- 构造模板参数 -->
+                        <sc:Input source="#{ {'subject':'岗位创建通知','body':'岗位ID：' + #bizId, 'bizId':#bizId} }" target="#templateParams" dataType="map"/>
+                        <sc:Output source="#result" target="#mailLogId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="innerMail-end" name="异步邮件结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#mailLogId" target="#subResult.mailLogId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="imt1" from="innerMail-start" to="innerMail-send"/>
+            <sc:Transition id="imt2" from="innerMail-send" to="innerMail-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== Branch 3: Async子流程（外层ASYNC，内层TX角色） ==================== -->
+    <sc:Workflow id="outer-async-tx-process" name="外层ASYNC子流程-含内层TX" version="8.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="triggerInnerTxFail" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="asyncTx-start" name="ASYNC+TX开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 外层创建用户（ASYNC无事务） -->
+            <sc:Activity id="asyncTx-createUser" name="创建用户(Async外)" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#userId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 内层TX子流程：创建角色并分配菜单 -->
+            <sc:Activity id="asyncTx-inner-tx-role" name="内层TX-角色权限" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-hybrid-3sub-mixed" workflowId="inner-tx-role-process" version="8.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Input source="#triggerInnerTxFail" target="#triggerError" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId" dataType="long"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="TX" timeout="30000">
+                        <sc:TransactionConfig propagation="REQUIRES_NEW" isolation="READ_COMMITTED" timeout="30" rollbackFor="java.lang.Exception"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <sc:Activity id="asyncTx-end" name="ASYNC+TX结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#userId" target="#subResult.userId" dataType="long"/>
+                        <sc:Output source="#roleId" target="#subResult.roleId" dataType="long"/>
+                        <sc:Output source="'ASYNC_OUTER_TX_INNER_SUCCESS'" target="#subResult.branch3Msg" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="art1" from="asyncTx-start" to="asyncTx-createUser"/>
+            <sc:Transition id="art2" from="asyncTx-createUser" to="asyncTx-inner-tx-role"/>
+            <sc:Transition id="art3" from="asyncTx-inner-tx-role" to="asyncTx-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- 内层TX角色权限子流程 -->
+    <sc:Workflow id="inner-tx-role-process" name="内层TX-角色权限" version="8.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="triggerError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="innerTx-start" name="TX角色开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 创建角色（在TX内） -->
+            <sc:Activity id="innerTx-createRole" name="创建角色" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="createRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest" target="#createReqVO" dataType="bean"/>
+                        <sc:Input source="1" target="#type" dataType="int"/>
+                        <sc:Output source="#result" target="#roleId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 分配菜单 -->
+            <sc:Activity id="innerTx-assignMenu" name="分配菜单(TX内)" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="permissionService" method="assignRoleMenu"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="innerTx-end" name="TX角色结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#roleId" target="#subResult.roleId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="itr1" from="innerTx-start" to="innerTx-createRole"/>
+            <sc:Transition id="itr2" from="innerTx-createRole" to="innerTx-assignMenu"/>
+            <sc:Transition id="itr3" from="innerTx-assignMenu" to="innerTx-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

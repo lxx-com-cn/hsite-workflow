@@ -1,0 +1,2 @@
+com.hbs.site.framework.redis.config.HbsRedisAutoConfiguration
+com.hbs.site.framework.redis.config.HbsCacheAutoConfiguration

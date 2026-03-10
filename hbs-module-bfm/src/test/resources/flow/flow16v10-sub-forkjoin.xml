@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography"
+            id="forkjoin-dept-demo"
+            name="FORKJOIN批量创建部门演示"
+            version="1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- 主流程：接收部门列表，调用FORKJOIN子流程批量创建，聚合部门ID列表 -->
+    <sc:Workflow id="main-forkjoin-dept" name="主流程-批量创建部门" version="1.0.0" type="MAIN" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptList" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="batchDeptIds" type="list" direction="OUT"/>
+            <sc:Parameter name="batchMessage" type="string" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="start" name="开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- FORKJOIN子流程调用 -->
+            <sc:Activity id="forkjoin-sub-dept" name="批量创建部门" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="forkjoin-dept-demo" workflowId="sub-forkjoin-create-dept" version="1.0.0"/>
+
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 输入：将主流程的deptList传递给子流程的batchInput -->
+                        <sc:Input source="#deptList" target="#batchInput" dataType="list"/>
+
+                        <!-- 输出：从子流程接收部门ID列表和消息 -->
+                        <sc:Output source="#deptIds" target="#batchDeptIds" dataType="list"/>
+                        <sc:Output source="#message" target="#batchMessage" dataType="string"/>
+                    </sc:DataMapping>
+
+                    <!-- FORKJOIN执行策略配置 -->
+                    <sc:ExecutionStrategy mode="FORKJOIN" timeout="60000">
+                        <sc:ForkJoinConfig threshold="5" parallelism="-1" asyncMode="false"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+
+            <sc:Activity id="end" name="结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#batchDeptIds" target="#batchDeptIds" dataType="list"/>
+                        <sc:Output source="'批量创建部门完成，共' + #batchDeptIds.size() + '个'" target="#batchMessage" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="t1" from="start" to="forkjoin-sub-dept"/>
+            <sc:Transition id="t2" from="forkjoin-sub-dept" to="end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- 子流程：处理单个部门创建请求，接收batchInput（列表，包含单个元素），返回deptIds（列表）和message -->
+    <sc:Workflow id="sub-forkjoin-create-dept" name="子流程-单部门创建" version="1.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="batchInput" type="list" direction="IN" required="true"/>
+            <sc:Parameter name="deptIds" type="list" direction="OUT"/>
+            <sc:Parameter name="message" type="string" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="sub-start" name="子流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 创建单个部门 -->
+            <sc:Activity id="sub-create-dept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 从batchInput的第一个元素获取部门请求对象 -->
+                        <sc:Input source="#batchInput[0]" target="#deptRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="sub-end" name="子流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 将部门ID包装为单元素列表 -->
+                        <sc:Output source="#{ {#deptId} }" target="#deptIds" dataType="list"/>
+                        <sc:Output source="'部门创建成功'" target="#message" dataType="string"/>
+                        <!-- 同时存入subResult备用 -->
+                        <sc:Output source="#deptId" target="#subResult.deptId" dataType="long"/>
+                        <sc:Output source="#message" target="#subResult.message" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="st1" from="sub-start" to="sub-create-dept"/>
+            <sc:Transition id="st2" from="sub-create-dept" to="sub-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

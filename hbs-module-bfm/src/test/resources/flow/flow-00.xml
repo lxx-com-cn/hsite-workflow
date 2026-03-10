@@ -1,0 +1,325 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd" id="full-coverage-pkg" name="全面覆盖测试包" version="2.5.1-beta" expressionLanguage="MVEL" tenantId="test-tenant">
+	<!-- ========== 1. 消息定义 ========== -->
+	<sc:Messages>
+		<sc:Message id="msg-start" name="启动消息" channel="kafka" payloadType="JSON" serialization="JSON"/>
+		<sc:Message id="msg-end" name="结束消息" channel="rabbitmq" payloadType="XML" serialization="XML"/>
+		<sc:Message id="msg-signal" name="信号消息" channel="internal" payloadType="JSON" serialization="JSON"/>
+		<sc:Message id="msg-timer" name="定时消息" channel="redis" payloadType="JSON" serialization="JSON"/>
+		<sc:Message id="msg-error" name="错误消息" channel="kafka" payloadType="JSON"/>
+		<!-- serialization 使用默认值 -->
+	</sc:Messages>
+	<!-- ========== 2. 工作流1：主流程（覆盖所有活动类型及配置） ========== -->
+	<sc:Workflow id="main-flow" name="主流程" version="1.0.0" type="MAIN" expressionLanguage="SpEL" tenantId="main-tenant" contractMode="STRICT">
+		<!-- 2.1 参数定义（只使用Schema定义的属性） -->
+		<sc:Parameters>
+			<sc:Parameter name="paramString" type="string" direction="IN" required="true"/>
+			<sc:Parameter name="paramInt" type="int" direction="INOUT" required="true"/>
+			<sc:Parameter name="paramLong" type="long" direction="IN" required="false"/>
+			<sc:Parameter name="paramDouble" type="double" direction="IN" required="false"/>
+			<sc:Parameter name="paramBoolean" type="boolean" direction="IN" required="false"/>
+			<sc:Parameter name="paramDate" type="date" direction="IN" required="false"/>
+			<sc:Parameter name="paramDatetime" type="datetime" direction="IN" required="false"/>
+			<sc:Parameter name="paramList" type="list" className="java.util.ArrayList" direction="INOUT" required="true"/>
+			<sc:Parameter name="paramSet" type="set" className="java.util.HashSet" direction="IN" required="false"/>
+			<sc:Parameter name="paramMap" type="map" direction="INOUT" required="false"/>
+			<sc:Parameter name="paramBean" type="bean" className="java.util.HashMap" direction="OUT" required="false"/>
+		</sc:Parameters>
+		<!-- 2.2 活动定义 -->
+		<sc:Activities>
+			<!-- 2.2.1 开始事件（message类型） -->
+			<sc:Activity id="start" name="开始" type="START_EVENT" x="100" y="50" width="120" height="60">
+				<sc:StartEvent type="message" messageRef="msg-start">
+					<sc:DataMapping strategy="MERGE" scope="WORKFLOW" lazy="false">
+						<sc:Input source="#paramString" target="#workflow.strField" dataType="string" required="true"/>
+						<sc:Input source="#paramInt" target="#workflow.intField" dataType="int" converter="stringToInt" required="false"/>
+						<sc:Output source="#workflow.result" target="#output.result" dataType="bean" beanClass="java.util.HashMap" persist="true"/>
+					</sc:DataMapping>
+					<sc:FaultHandler timeout="5000" timeoutTransitionTo="errorEnd">
+						<sc:RetryPolicy maxAttempts="2" backoff="500" backoffMultiplier="1.5" maxBackoff="5000" idempotent="true" retryOn="#{exception instanceof T(java.lang.Exception)}"/>
+						<sc:Catch exception="java.lang.IllegalArgumentException" transitionTo="errorEnd" logLevel="ERROR"/>
+						<sc:Compensation compensateTo="compensateTask" strategy="ROLLBACK"/>
+						<sc:Snapshot enabled="true" includeVariables="true" includeData="false" storageRef="snapshotStore" snapshotData="{}"/>
+					</sc:FaultHandler>
+				</sc:StartEvent>
+			</sc:Activity>
+			<!-- 2.2.2 自动任务：REST类型 -->
+			<sc:Activity id="restTask" name="REST调用" type="AUTO_TASK" x="300" y="50">
+				<sc:AutoTask async="true" priority="10" runIsolated="true">
+					<sc:REST endpoint="https://api.test.com/v1/resource" method="POST" headers="Authorization:Bearer token123,Content-Type:application/json" timeout="45000" retryable="true" format="JSON"/>
+					<sc:DataMapping strategy="DEEP_MERGE" scope="LOCAL" lazy="true">
+						<sc:Input source="#workflow.strField" target="#request.body.name" dataType="string"/>
+						<sc:Input source="#workflow.intField" target="#request.body.value" dataType="int" converter="stringToInt"/>
+						<sc:Output source="#response.data" target="#workflow.restResult" dataType="bean" beanClass="java.util.LinkedHashMap" persist="true"/>
+					</sc:DataMapping>
+					<sc:FaultHandler timeout="30000">
+						<sc:RetryPolicy maxAttempts="3" backoff="1000" backoffMultiplier="2.0" maxBackoff="10000" idempotent="false" retryOn="#{exception instanceof T(java.net.ConnectException)}"/>
+						<sc:Catch exception="java.net.ConnectException" transitionTo="fallbackTask" logLevel="WARN"/>
+					</sc:FaultHandler>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.3 自动任务：WebService类型 -->
+			<sc:Activity id="wsTask" name="WebService调用" type="AUTO_TASK" x="500" y="50">
+				<sc:AutoTask async="false" priority="5">
+					<sc:WebService wsdl="http://service.test.com/DeptService?wsdl" operation="createDept" port="DeptPort" timeout="30000" encoding="SOAP11"/>
+					<sc:DataMapping>
+						<sc:Input source="#workflow.deptName" target="#args.name" dataType="string"/>
+						<sc:Output source="#return.id" target="#workflow.deptId" dataType="long" persist="false"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.4 自动任务：JavaBean类型 -->
+			<sc:Activity id="javaBeanTask" name="JavaBean调用" type="AUTO_TASK" x="700" y="50">
+				<sc:AutoTask>
+					<sc:JavaBean class="com.example.DeptService" method="validate" static="false"/>
+					<sc:DataMapping>
+						<sc:Input source="#workflow.deptId" target="#args.id" dataType="long"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.5 自动任务：SpringBean类型 -->
+			<sc:Activity id="springBeanTask" name="SpringBean调用" type="AUTO_TASK" x="900" y="50">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="getDept"/>
+					<sc:DataMapping>
+						<sc:Output source="#return" target="#workflow.deptInfo" dataType="bean" persist="true"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.6 自动任务：Message类型 -->
+			<sc:Activity id="messageTask" name="消息发送" type="AUTO_TASK" x="1100" y="50">
+				<sc:AutoTask async="true">
+					<sc:Message channel="kafka" topic="test-topic" messageType="JSON"/>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.7 排他网关（SPLIT） -->
+			<sc:Activity id="exclusiveGw" name="排他网关" type="EXCLUSIVE_GATEWAY" x="300" y="200">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 2.2.8 并行网关（SPLIT） -->
+			<sc:Activity id="parallelSplit" name="并行分支" type="PARALLEL_GATEWAY" x="500" y="200">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 2.2.9 并行任务1 -->
+			<sc:Activity id="parallelTask1" name="并行任务1" type="AUTO_TASK" x="400" y="300">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="getList"/>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.10 并行任务2 -->
+			<sc:Activity id="parallelTask2" name="并行任务2" type="AUTO_TASK" x="600" y="300">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="userService" method="getList"/>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.11 并行网关（JOIN） -->
+			<sc:Activity id="parallelJoin" name="并行合并" type="PARALLEL_GATEWAY" x="500" y="400">
+				<sc:Gateway mode="JOIN"/>
+			</sc:Activity>
+			<!-- 2.2.12 包容网关（SPLIT） -->
+			<sc:Activity id="inclusiveGw" name="包容网关" type="INCLUSIVE_GATEWAY" x="700" y="200">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 2.2.13 复杂网关（BOTH） -->
+			<sc:Activity id="complexGw" name="复杂网关" type="COMPLEX_GATEWAY" x="900" y="200">
+				<sc:Gateway mode="BOTH"/>
+			</sc:Activity>
+			<!-- 2.2.14 人工任务：固定指派 + 会签 + 完整表单 -->
+			<sc:Activity id="userTaskFixed" name="固定指派任务" type="USER_TASK" x="1100" y="200">
+				<sc:UserTask category="test-fixed" urgency="URGENT">
+					<sc:Assignment strategy="FIXED">
+						<sc:User>user001</sc:User>
+						<sc:User>user002</sc:User>
+						<sc:Role>role-admin</sc:Role>
+						<sc:Group>group-finance</sc:Group>
+						<sc:Expression value="#process.creator" language="SpEL"/>
+					</sc:Assignment>
+					<sc:CompletionRule type="ALL" threshold="1.0" timeout="86400000"/>
+					<sc:Form schemaRef="form-schema.json" version="1.0" layout="grid" columns="2">
+						<sc:Field name="approveResult" type="boolean" label="审批结果" component="radio" required="true" permission="EDITABLE" options="true|false" defaultValue="false"/>
+						<sc:Field name="comment" type="string" label="审批意见" component="textarea" required="false" permission="EDITABLE" validation="maxLength[500]"/>
+					</sc:Form>
+					<sc:DataMapping strategy="MERGE" scope="WORKFLOW">
+						<sc:Input source="#workflow.applyInfo" target="#form.apply" dataType="bean"/>
+						<sc:Output source="#form.result" target="#workflow.approveResult" dataType="boolean" persist="true"/>
+					</sc:DataMapping>
+					<sc:ExtendedOperation allowAddUser="true" allowTransfer="true" allowBack="true" allowDelegate="true" allowUrge="true"/>
+				</sc:UserTask>
+			</sc:Activity>
+			<!-- 2.2.15 人工任务：认领策略 + 部分配置 -->
+			<sc:Activity id="userTaskClaim" name="认领任务" type="USER_TASK" x="100" y="400">
+				<sc:UserTask category="test-claim" urgency="HIGH">
+					<sc:Assignment strategy="CLAIM">
+						<sc:Role>role-manager</sc:Role>
+					</sc:Assignment>
+					<sc:CompletionRule type="ANY"/>
+				</sc:UserTask>
+			</sc:Activity>
+			<!-- 2.2.16 TX模式子流程（包含所有子元素） -->
+			<sc:Activity id="txSub" name="事务子流程" type="SUB_PROCESS" x="300" y="400">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="full-coverage-pkg" workflowId="sub-flow" version="1.0.0"/>
+					<sc:DataMapping>
+						<sc:Input source="#workflow.deptId" target="#sub.deptId" dataType="long"/>
+						<sc:Output source="#sub.result" target="#workflow.subResult" dataType="bean"/>
+					</sc:DataMapping>
+					<sc:ExecutionStrategy mode="TX" timeout="60000" name="tx-strategy" description="事务子流程">
+						<sc:TransactionConfig propagation="REQUIRES_NEW" isolation="READ_COMMITTED" timeout="45" rollbackFor="java.lang.RuntimeException"/>
+					</sc:ExecutionStrategy>
+					<sc:Dependencies>
+						<sc:Depend activityId="restTask" must="true" resultMapping="#workflow.restResult"/>
+					</sc:Dependencies>
+					<sc:Callback onSuccess="#workflow.txSuccess" onFailure="#workflow.txFailure" defaultValue="{}"/>
+					<sc:InputSchema type="LIST" itemType="java.util.Map" sizeField="total"/>
+					<sc:FaultHandler>
+						<sc:RetryPolicy maxAttempts="2" backoff="1000"/>
+					</sc:FaultHandler>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 2.2.17 ASYNC模式子流程（含ThreadPool） -->
+			<sc:Activity id="asyncSub" name="异步子流程" type="SUB_PROCESS" x="500" y="400">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="full-coverage-pkg" workflowId="sub-flow" version="1.0.0"/>
+					<sc:ExecutionStrategy mode="ASYNC" timeout="120000">
+						<sc:ThreadPool coreSize="5" maxSize="20" queueCapacity="500" keepAliveSeconds="30" threadNamePrefix="async-"/>
+					</sc:ExecutionStrategy>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 2.2.18 FUTURE模式子流程（含FutureConfig和Callback） -->
+			<sc:Activity id="futureSub" name="Future子流程" type="SUB_PROCESS" x="700" y="400">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="full-coverage-pkg" workflowId="sub-flow" version="1.0.0"/>
+					<sc:ExecutionStrategy mode="FUTURE" timeout="180000">
+						<sc:FutureConfig dependencyType="ALL" callbackEnabled="true" skipOnNextRunning="true" defaultValueOnException="{}"/>
+					</sc:ExecutionStrategy>
+					<sc:Dependencies>
+						<sc:Depend activityId="parallelTask1" must="true"/>
+						<sc:Depend activityId="parallelTask2" must="true"/>
+					</sc:Dependencies>
+					<sc:Callback onSuccess="#workflow.futureSuccess" onFailure="#workflow.futureFailure" onTimeout="#workflow.futureTimeout" defaultValue="{}"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 2.2.19 FORKJOIN模式子流程（含ForkJoinConfig和InputSchema） -->
+			<sc:Activity id="forkJoinSub" name="ForkJoin子流程" type="SUB_PROCESS" x="900" y="400">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="full-coverage-pkg" workflowId="sub-flow" version="1.0.0"/>
+					<sc:ExecutionStrategy mode="FORKJOIN" timeout="300000">
+						<sc:ForkJoinConfig parallelism="4" asyncMode="true" threshold="500" batchSize="50"/>
+					</sc:ExecutionStrategy>
+					<sc:InputSchema type="LIST" itemType="java.util.Map" sizeField="total"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 2.2.20 补偿任务 -->
+			<sc:Activity id="compensateTask" name="补偿任务" type="AUTO_TASK" x="300" y="500">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="compensateService" method="execute"/>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.21 备用任务 -->
+			<sc:Activity id="fallbackTask" name="备用任务" type="AUTO_TASK" x="500" y="500">
+				<sc:AutoTask>
+					<sc:JavaBean class="com.example.FallbackService" method="handle" static="true"/>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 2.2.22 正常结束事件（message类型） -->
+			<sc:Activity id="normalEnd" name="正常结束" type="END_EVENT" x="700" y="500">
+				<sc:EndEvent type="message" messageRef="msg-end">
+					<sc:DataMapping>
+						<sc:Output source="#workflow.finalResult" target="#output.result" dataType="bean"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+			<!-- 2.2.23 异常结束事件（terminate类型） -->
+			<sc:Activity id="errorEnd" name="异常结束" type="END_EVENT" x="900" y="500">
+				<sc:EndEvent type="terminate"/>
+			</sc:Activity>
+		</sc:Activities>
+		<!-- 2.3 转移定义（覆盖所有属性） -->
+		<sc:Transitions>
+			<sc:Transition id="t-start-rest" from="start" to="restTask" priority="1"/>
+			<sc:Transition id="t-rest-ws" from="restTask" to="wsTask" condition="#workflow.intField > 0" priority="2" expressionLanguage="SpEL" default="false" sourceAnchor="RIGHT" targetAnchor="LEFT" waypoints="350,80 450,80"/>
+			<sc:Transition id="t-ws-java" from="wsTask" to="javaBeanTask"/>
+			<sc:Transition id="t-java-spring" from="javaBeanTask" to="springBeanTask"/>
+			<sc:Transition id="t-spring-msg" from="springBeanTask" to="messageTask"/>
+			<sc:Transition id="t-msg-exclusive" from="messageTask" to="exclusiveGw"/>
+			<sc:Transition id="t-exclusive-parallel" from="exclusiveGw" to="parallelSplit" condition="#workflow.intField > 10" priority="5" expressionLanguage="MVEL" default="false"/>
+			<sc:Transition id="t-exclusive-inclusive" from="exclusiveGw" to="inclusiveGw" default="true" priority="10"/>
+			<sc:Transition id="t-parallel-split1" from="parallelSplit" to="parallelTask1"/>
+			<sc:Transition id="t-parallel-split2" from="parallelSplit" to="parallelTask2"/>
+			<sc:Transition id="t-parallel-join1" from="parallelTask1" to="parallelJoin"/>
+			<sc:Transition id="t-parallel-join2" from="parallelTask2" to="parallelJoin"/>
+			<sc:Transition id="t-parallel-join-out" from="parallelJoin" to="complexGw"/>
+			<sc:Transition id="t-inclusive-user" from="inclusiveGw" to="userTaskFixed" condition="#workflow.needApproval == true" priority="1"/>
+			<sc:Transition id="t-inclusive-tx" from="inclusiveGw" to="txSub" condition="#workflow.useTx == true" priority="2"/>
+			<sc:Transition id="t-inclusive-default" from="inclusiveGw" to="complexGw" default="true"/>
+			<sc:Transition id="t-complex-async" from="complexGw" to="asyncSub" priority="1"/>
+			<sc:Transition id="t-complex-future" from="complexGw" to="futureSub" priority="2"/>
+			<sc:Transition id="t-complex-forkjoin" from="complexGw" to="forkJoinSub" priority="3"/>
+			<sc:Transition id="t-async-normal" from="asyncSub" to="normalEnd"/>
+			<sc:Transition id="t-future-normal" from="futureSub" to="normalEnd"/>
+			<sc:Transition id="t-forkjoin-normal" from="forkJoinSub" to="normalEnd"/>
+			<sc:Transition id="t-tx-normal" from="txSub" to="normalEnd"/>
+			<sc:Transition id="t-user-claim" from="userTaskFixed" to="userTaskClaim"/>
+			<sc:Transition id="t-claim-normal" from="userTaskClaim" to="normalEnd"/>
+			<sc:Transition id="t-rest-fallback" from="restTask" to="fallbackTask" condition="#exception != null" priority="99"/>
+			<sc:Transition id="t-fallback-error" from="fallbackTask" to="errorEnd"/>
+			<sc:Transition id="t-start-error" from="start" to="errorEnd" condition="#exception instanceof T(java.lang.Exception)"/>
+		</sc:Transitions>
+		<!-- 2.4 调试配置 -->
+		<sc:DebugProfile enabled="true" logLevel="DEBUG" traceVariables="true" recordExecutionPath="true" persistExecutionData="true" traceIdHeader="X-Trace-Id"/>
+		<!-- 2.5 监控配置 -->
+		<sc:MonitoringProfile enabled="true">
+			<sc:Metric name="process_start" type="COUNTER" activityRef="start"/>
+			<sc:Metric name="rest_duration" type="TIMER" activityRef="restTask"/>
+			<sc:Metric name="user_task_pending" type="GAUGE" activityRef="userTaskFixed"/>
+		</sc:MonitoringProfile>
+	</sc:Workflow>
+	<!-- ========== 3. 工作流2：子流程（供引用） ========== -->
+	<sc:Workflow id="sub-flow" name="子流程" version="1.0.0" type="SUB" contractMode="DYNAMIC">
+		<sc:Parameters>
+			<sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="subStart" name="子流程开始" type="START_EVENT" x="100" y="50">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<sc:Activity id="subTask" name="子流程处理" type="AUTO_TASK" x="300" y="50">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="getDept"/>
+					<sc:DataMapping>
+						<sc:Input source="#deptId" target="#args.id" dataType="long"/>
+						<sc:Output source="#return" target="#result" dataType="bean"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subEnd" name="子流程结束" type="END_EVENT" x="500" y="50">
+				<sc:EndEvent/>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="t-sub-start" from="subStart" to="subTask"/>
+			<sc:Transition id="t-sub-end" from="subTask" to="subEnd"/>
+		</sc:Transitions>
+	</sc:Workflow>
+	<!-- ========== 4. 依赖配置 ========== -->
+	<sc:Dependencies>
+		<sc:Import packageId="common-services" versionRange="[1.0.0,2.0.0)" optional="false"/>
+		<sc:Import packageId="notification-service" versionRange="[2.5.0,3.0.0)" optional="true"/>
+		<sc:Import packageId="external-api" versionRange="[1.5.0,1.9.9]" optional="false"/>
+	</sc:Dependencies>
+	<!-- ========== 5. 全局配置 ========== -->
+	<sc:GlobalConfig>
+		<sc:DebugProfile enabled="true" logLevel="INFO" traceVariables="false"/>
+		<sc:MonitoringProfile enabled="false">
+			<sc:Metric name="global_counter" type="COUNTER"/>
+			<sc:Metric name="global_timer" type="TIMER"/>
+		</sc:MonitoringProfile>
+		<sc:DeploymentProfile mode="CLUSTER" instanceStrategy="PRELOAD" resourceGroup="prod-group" preload="true" cacheable="false"/>
+		<sc:DefaultFaultHandler timeout="30000">
+			<sc:RetryPolicy maxAttempts="3" backoff="1000" backoffMultiplier="2.0" maxBackoff="30000" idempotent="true"/>
+			<sc:Catch exception="java.lang.Exception" transitionTo="errorEnd" logLevel="ERROR"/>
+			<sc:Compensation compensateTo="compensateTask" strategy="COMPENSATE"/>
+			<sc:Snapshot enabled="false"/>
+		</sc:DefaultFaultHandler>
+	</sc:GlobalConfig>
+</sc:Package>

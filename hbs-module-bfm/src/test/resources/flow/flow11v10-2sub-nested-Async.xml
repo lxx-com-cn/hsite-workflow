@@ -1,0 +1,284 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography " 
+            id="org-permission-nested-async" 
+            name="嵌套ASYNC子流程组织权限" 
+            version="7.0.0" 
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance " 
+            xsi:schemaLocation="http://www.example.com/service-choreography  workflow-v10.xsd">
+
+    <!-- ==================== Main Workflow: 嵌套ASYNC ==================== -->
+    <sc:Workflow id="main-nested-async-process" name="主流程-嵌套ASYNC子流程" version="7.0.0" type="MAIN" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="onboardingResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+            <sc:Parameter name="permissionResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="main-createDept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <!-- 明确指定返回类型为 long -->
+                        <sc:Output source="#result" target="#deptId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- 外层ASYNC子流程：岗位用户处理（嵌套内层ASYNC） -->
+            <sc:Activity id="main-outer-async" name="外层ASYNC子流程-岗位用户处理" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-permission-nested-async" workflowId="outer-async-postuser-process" version="7.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <!-- 所有输出字段明确指定 dataType="long" -->
+                        <sc:Output source="#subResult.postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#subResult.userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#subResult.innerAsyncLogId" target="#innerAsyncLogId" dataType="long"/>
+                        <sc:Output source="#subResult.outerAsyncLogId" target="#outerAsyncLogId" dataType="long"/>
+                        <sc:Output source="#subResult.outerAsyncMessage" target="#outerAsyncMessage" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="ASYNC" timeout="20000">
+                        <sc:ThreadPool coreSize="3" maxSize="15" queueCapacity="100" threadNamePrefix="bfm-outer-async-"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-queryPost" name="查询岗位详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <!-- 查询结果可以是任意类型，不强制转换 -->
+                        <sc:Output source="#result" target="#onboardingResult.postDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-queryUser" name="查询用户详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#onboardingResult.userDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-queryRole" name="查询角色详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="getRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#result" target="#permissionResult.roleDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#onboardingResult" target="#onboardingResult"/>
+                        <sc:Output source="#permissionResult" target="#permissionResult"/>
+                        <sc:Output source="#outerAsyncMessage" target="#onboardingResult.outerAsyncMessage"/>
+                        <sc:Output source="'NESTED_ASYNC_SUCCESS'" target="#onboardingResult.status" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="t1" from="main-start" to="main-createDept"/>
+            <sc:Transition id="t2" from="main-createDept" to="main-outer-async"/>
+            <sc:Transition id="t3" from="main-outer-async" to="main-queryPost"/>
+            <sc:Transition id="t4" from="main-queryPost" to="main-queryUser"/>
+            <sc:Transition id="t5" from="main-queryUser" to="main-queryRole"/>
+            <sc:Transition id="t6" from="main-queryRole" to="main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== Outer ASYNC Sub Workflow: 岗位用户处理 ==================== -->
+    <sc:Workflow id="outer-async-postuser-process" name="外层ASYNC子流程-岗位用户处理" version="7.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="outerAsync-start" name="外层ASYNC开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="outerAsync-createPost" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postRequest.name" target="#postRequest.name" dataType="string"/>
+                        <sc:Input source="#postRequest.code" target="#postRequest.code" dataType="string"/>
+                        <sc:Input source="#postRequest.status" target="#postRequest.status" dataType="int"/>
+                        <sc:Input source="#postRequest.sort" target="#postRequest.sort" dataType="int"/>
+                        <sc:Input source="#deptId" target="#postRequest.deptId" dataType="long"/>
+                        <sc:Output source="#result" target="#postId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- 发送站内信 -->
+            <sc:Activity id="outerAsync-notify" name="发送外层站内信" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="notifySendService" method="sendSingleNotifyToAdmin"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="1" target="#userId" dataType="long"/>
+                        <sc:Input source="'OUTER_ASYNC_NOTIFY_TEMPLATE'" target="#templateCode" dataType="string"/>
+                        <sc:Input source="#{ {'title':'外层任务完成','content':'岗位已创建，ID：' + #postId} }" target="#templateParams" dataType="map"/>
+                        <sc:Output source="#result" target="#outerAsyncLogId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- 内层ASYNC子流程：角色权限处理 -->
+            <sc:Activity id="outerAsync-inner-async-role" name="内层ASYNC子流程-角色权限处理" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-permission-nested-async" workflowId="inner-async-roleperm-process" version="7.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <!-- 输出字段指定 dataType="long" -->
+                        <sc:Output source="#subResult.roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#subResult.roleDetail" target="#roleDetail"/>
+                        <sc:Output source="#subResult.innerAsyncLogId" target="#innerAsyncLogId" dataType="long"/>
+                        <sc:Output source="#subResult.innerAsyncMessage" target="#innerAsyncMessage" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="ASYNC" timeout="15000">
+                        <sc:ThreadPool coreSize="2" maxSize="10" queueCapacity="50" threadNamePrefix="bfm-inner-async-"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="outerAsync-createUser" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userRequest.username" target="#userRequest.username" dataType="string"/>
+                        <sc:Input source="#userRequest.nickname" target="#userRequest.nickname" dataType="string"/>
+                        <sc:Input source="#userRequest.password" target="#userRequest.password" dataType="string"/>
+                        <sc:Input source="#userRequest.sex" target="#userRequest.sex" dataType="int"/>
+                        <sc:Input source="#userRequest.mobile" target="#userRequest.mobile" dataType="string"/>
+                        <sc:Input source="#userRequest.email" target="#userRequest.email" dataType="string"/>
+                        <sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#userRequest.postIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Output source="#result" target="#userId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="outerAsync-end" name="外层ASYNC结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#postId" target="#subResult.postId" dataType="long"/>
+                        <sc:Output source="#userId" target="#subResult.userId" dataType="long"/>
+                        <sc:Output source="#roleId" target="#subResult.roleId" dataType="long"/>
+                        <sc:Output source="#roleDetail" target="#subResult.roleDetail"/>
+                        <sc:Output source="#innerAsyncLogId" target="#subResult.innerAsyncLogId" dataType="long"/>
+                        <sc:Output source="#outerAsyncLogId" target="#subResult.outerAsyncLogId" dataType="long"/>
+                        <sc:Output source="#innerAsyncMessage" target="#subResult.innerAsyncMessage" dataType="string"/>
+                        <sc:Output source="'OUTER_ASYNC_SUCCESS'" target="#subResult.outerAsyncMessage" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="ot1" from="outerAsync-start" to="outerAsync-createPost"/>
+            <sc:Transition id="ot2" from="outerAsync-createPost" to="outerAsync-notify"/>
+            <sc:Transition id="ot3" from="outerAsync-notify" to="outerAsync-inner-async-role"/>
+            <sc:Transition id="ot4" from="outerAsync-inner-async-role" to="outerAsync-createUser"/>
+            <sc:Transition id="ot5" from="outerAsync-createUser" to="outerAsync-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== Inner ASYNC Sub Workflow: 角色权限处理 ==================== -->
+    <sc:Workflow id="inner-async-roleperm-process" name="内层ASYNC子流程-角色权限处理" version="7.0.0" type="SUB" contractMode="DYNAMIC">
+        <sc:Parameters>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="innerAsync-start" name="内层ASYNC开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="innerAsync-createRole" name="创建角色" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="createRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest.name" target="#roleRequest.name" dataType="string"/>
+                        <sc:Input source="#roleRequest.code" target="#roleRequest.code" dataType="string"/>
+                        <sc:Input source="#roleRequest.sort" target="#roleRequest.sort" dataType="int"/>
+                        <sc:Input source="#roleRequest.status" target="#roleRequest.status" dataType="int"/>
+                        <sc:Input source="1" target="#type" dataType="int"/>
+                        <sc:Output source="#result" target="#roleId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- 操作日志：返回void，输出固定值 -1 表示成功，明确指定 long -->
+            <sc:Activity id="innerAsync-operateLog" name="记录操作日志" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="operateLogServiceImpl" method="createOperateLog"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 构建 OperateLogCreateReqDTO，补充必要字段 -->
+                        <sc:Input source="#{ T(org.slf4j.MDC).get('traceId') }" target="#createReqDTO.traceId" dataType="string" required="false"/>
+                        <sc:Input source="1" target="#createReqDTO.userId" dataType="long"/>
+                        <sc:Input source="2" target="#createReqDTO.userType" dataType="int"/>
+                        <sc:Input source="'角色管理'" target="#createReqDTO.type" dataType="string"/>
+                        <sc:Input source="'创建角色'" target="#createReqDTO.subType" dataType="string"/>
+                        <sc:Input source="#roleId" target="#createReqDTO.bizId" dataType="long"/>
+                        <sc:Input source="'创建了角色【' + #roleRequest.name + '】'" target="#createReqDTO.action" dataType="string"/>
+                        <sc:Input source="'{}'" target="#createReqDTO.extra" dataType="string"/>
+                        <!-- 输出固定值 -1，类型为 long -->
+                        <sc:Output source="-1" target="#innerAsyncLogId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="innerAsync-assignMenu" name="分配角色菜单" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="permissionService" method="assignRoleMenu"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="innerAsync-queryRole" name="查询角色详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="getRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#result" target="#subResult.roleDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="innerAsync-end" name="内层ASYNC结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#roleId" target="#subResult.roleId" dataType="long"/>
+                        <sc:Output source="#subResult.roleDetail" target="#subResult.roleDetail"/>
+                        <sc:Output source="#innerAsyncLogId" target="#subResult.innerAsyncLogId" dataType="long"/>
+                        <sc:Output source="#menuIds" target="#subResult.permIds"/>
+                        <sc:Output source="'INNER_ASYNC_SUCCESS'" target="#subResult.innerAsyncMessage" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="it1" from="innerAsync-start" to="innerAsync-createRole"/>
+            <sc:Transition id="it2" from="innerAsync-createRole" to="innerAsync-operateLog"/>
+            <sc:Transition id="it3" from="innerAsync-operateLog" to="innerAsync-assignMenu"/>
+            <sc:Transition id="it4" from="innerAsync-assignMenu" to="innerAsync-queryRole"/>
+            <sc:Transition id="it5" from="innerAsync-queryRole" to="innerAsync-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

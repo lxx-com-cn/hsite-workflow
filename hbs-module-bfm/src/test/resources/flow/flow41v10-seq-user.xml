@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" id="flow41-seq-user-real" name="混合流程-用户任务-真实API" version="1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+	<sc:Workflow id="approval-process-real" name="审批流程-真实API" version="1.0.0" type="MAIN" contractMode="DYNAMIC">
+		<sc:Parameters>
+			<sc:Parameter name="requestId" type="string" direction="IN" required="true"/>
+			<sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN"/>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN"/>
+			<sc:Parameter name="applicant" type="string" direction="IN" required="true"/>
+			<sc:Parameter name="approveResult" type="string" direction="OUT"/>
+			<sc:Parameter name="finalDeptId" type="long" direction="OUT"/>
+			<sc:Parameter name="finalPostId" type="long" direction="OUT"/>
+			<sc:Parameter name="finalUserId" type="long" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<!-- 开始事件 -->
+			<sc:Activity id="start" name="开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<!-- 自动任务1：创建部门（使用真实deptService） -->
+			<sc:Activity id="createDept" name="创建部门" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="createDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptRequest" target="#deptRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO"/>
+						<sc:Output source="#result" target="#deptId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 人工任务1：部门经理审批（单人任务） -->
+			<sc:Activity id="deptManagerApprove" name="部门经理审批" type="USER_TASK">
+				<sc:UserTask category="审批" urgency="NORMAL">
+					<sc:Assignment strategy="FIXED">
+						<sc:User>dept_manager_001</sc:User>
+					</sc:Assignment>
+					<sc:CompletionRule type="ANY"/>
+					<sc:Form>
+						<sc:Field name="approveResult" type="radio" label="审批结果" required="true" options="AGREE:同意,REJECT:驳回,BACK:退回"/>
+						<sc:Field name="comment" type="textarea" label="审批意见"/>
+						<sc:Field name="deptId" type="number" label="部门ID确认"/>
+					</sc:Form>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptId" target="#approvalForm.deptId" dataType="long"/>
+						<sc:Output source="#formData.approveResult" target="#deptApproveResult"/>
+						<sc:Output source="#formData.comment" target="#deptComment"/>
+						<sc:Output source="#formData.deptId" target="#confirmedDeptId"/>
+					</sc:DataMapping>
+					<sc:ExtendedOperation allowTransfer="true" allowBack="true" allowUrge="true"/>
+				</sc:UserTask>
+			</sc:Activity>
+			<!-- 排他网关 -->
+			<sc:Activity id="gateway1" name="审批结果判断" type="EXCLUSIVE_GATEWAY">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 自动任务2：创建岗位（同意路径） -->
+			<sc:Activity id="createPost" name="创建岗位" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="createPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#confirmedDeptId" target="#postRequest.deptId" dataType="bean"/>
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO"/>
+						<sc:Output source="#result" target="#postId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 结束：驳回 -->
+			<sc:Activity id="endReject" name="流程结束-驳回" type="END_EVENT">
+				<sc:EndEvent type="terminate">
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="'REJECTED'" target="#approveResult"/>
+						<sc:Output source="#deptId" target="#finalDeptId"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+			<!-- 人工任务2：财务审批（或签任务） -->
+			<sc:Activity id="financeApprove" name="财务审批" type="USER_TASK">
+				<sc:UserTask category="审批" urgency="HIGH">
+					<sc:Assignment strategy="FIXED">
+						<sc:User>finance_001</sc:User>
+						<sc:User>finance_002</sc:User>
+						<sc:User>finance_manager</sc:User>
+					</sc:Assignment>
+					<sc:CompletionRule type="ANY"/>
+					<sc:Form>
+						<sc:Field name="approveResult" type="radio" label="审批结果" required="true" options="AGREE:同意,REJECT:驳回"/>
+						<sc:Field name="comment" type="textarea" label="审批意见"/>
+						<sc:Field name="postBudget" type="number" label="岗位预算确认"/>
+					</sc:Form>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postId" target="#financeForm.postId" dataType="long"/>
+						<sc:Output source="#formData.approveResult" target="#financeApproveResult"/>
+						<sc:Output source="#formData.postBudget" target="#confirmedBudget"/>
+					</sc:DataMapping>
+					<sc:ExtendedOperation allowTransfer="true" allowUrge="true"/>
+				</sc:UserTask>
+			</sc:Activity>
+			<!-- 自动任务3：创建用户 -->
+			<sc:Activity id="createUser" name="创建用户" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="createUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#confirmedDeptId" target="#userRequest.deptId" dataType="bean"/>
+						<sc:Input source="#postId" target="#userRequest.postIds = {#postId}" dataType="bean"/>
+						<sc:Input source="#userRequest" target="#userRequest" dataType="bean" beanClass="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO"/>
+						<sc:Output source="#result" target="#userId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 结束事件 -->
+			<sc:Activity id="end" name="流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="'COMPLETED'" target="#approveResult"/>
+						<sc:Output source="#deptId" target="#finalDeptId"/>
+						<sc:Output source="#postId" target="#finalPostId"/>
+						<sc:Output source="#userId" target="#finalUserId"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="t1" from="start" to="createDept"/>
+			<sc:Transition id="t2" from="createDept" to="deptManagerApprove"/>
+			<sc:Transition id="t3" from="deptManagerApprove" to="gateway1"/>
+			<sc:Transition id="t4" from="gateway1" to="createPost" condition="#deptApproveResult == 'AGREE'"/>
+			<sc:Transition id="t5" from="gateway1" to="endReject" condition="#deptApproveResult == 'REJECT'"/>
+			<sc:Transition id="t6" from="gateway1" to="deptManagerApprove" condition="#deptApproveResult == 'BACK'"/>
+			<sc:Transition id="t7" from="createPost" to="financeApprove"/>
+			<sc:Transition id="t8" from="financeApprove" to="createUser"/>
+			<sc:Transition id="t9" from="createUser" to="end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+</sc:Package>

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" id="inclusive-gateway-demo" name="包容网关示例" version="1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+	<sc:Workflow id="inclusive-process" name="包容网关多分支流程" version="1.0.0" type="MAIN" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="userType" type="string" direction="IN" required="true"/>
+			<sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="false"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="false"/>
+			<sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="false"/>
+			<sc:Parameter name="deptId" type="long" direction="OUT"/>
+			<sc:Parameter name="postId" type="long" direction="OUT"/>
+			<sc:Parameter name="roleId" type="long" direction="OUT"/>
+			<sc:Parameter name="result" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="start" name="开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<!-- 包容网关 SPLIT - 按约定命名包含 "Split" -->
+			<sc:Activity id="inclusiveSplit" name="包容网关分支开始" type="INCLUSIVE_GATEWAY">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 分支A：创建部门 -->
+			<sc:Activity id="branchCreateDept" name="创建部门" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="createDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptRequest" target="#deptRequest" dataType="bean" required="true"/>
+						<sc:Output source="#result" target="#deptId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 分支B：创建岗位 -->
+			<sc:Activity id="branchCreatePost" name="创建岗位" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="createPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean" required="true"/>
+						<sc:Output source="#result" target="#postId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 分支C：创建角色 -->
+			<sc:Activity id="branchCreateRole" name="创建角色" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="roleService" method="createRole"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleRequest" target="#createReqVO" dataType="bean" required="true"/>
+						<sc:Input source="1" target="#type" dataType="int"/>
+						<sc:Output source="#result" target="#roleId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 默认分支：无任何条件满足时执行 -->
+			<sc:Activity id="branchDefault" name="默认空分支" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="'DEFAULT'" target="#arg0"/>
+						<sc:Output source="#result" target="#defaultFlag"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 包容网关 JOIN - 按约定命名包含 "JOIN" -->
+			<sc:Activity id="inclusiveJoin" name="包容网关分支汇聚" type="INCLUSIVE_GATEWAY">
+				<sc:Gateway mode="JOIN"/>
+			</sc:Activity>
+			<!-- 结束事件：直接计算 executedBranches 并构建 result -->
+			<sc:Activity id="end" name="结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<!-- 计算执行分支字符串 -->
+						<sc:Output source="(#deptId != null ? 'A' : '') + (#postId != null ? 'B' : '') + (#roleId != null ? 'C' : '') + (#defaultFlag != null ? 'D' : '')" target="#executedBranches"/>
+						<!-- 构建结果 Map -->
+						<sc:Output source="#deptId" target="#result.deptId"/>
+						<sc:Output source="#postId" target="#result.postId"/>
+						<sc:Output source="#roleId" target="#result.roleId"/>
+						<sc:Output source="#executedBranches" target="#result.executedBranches"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="t-start-split" from="start" to="inclusiveSplit"/>
+			<!-- 包容网关条件分支 -->
+			<sc:Transition id="t-split-dept" from="inclusiveSplit" to="branchCreateDept" condition="#userType.contains('A')" priority="10"/>
+			<sc:Transition id="t-split-post" from="inclusiveSplit" to="branchCreatePost" condition="#userType.contains('B')" priority="9"/>
+			<sc:Transition id="t-split-role" from="inclusiveSplit" to="branchCreateRole" condition="#userType.contains('C')" priority="8"/>
+			<sc:Transition id="t-split-default" from="inclusiveSplit" to="branchDefault" default="true" priority="1"/>
+			<!-- 各分支指向 JOIN -->
+			<sc:Transition id="t-dept-join" from="branchCreateDept" to="inclusiveJoin"/>
+			<sc:Transition id="t-post-join" from="branchCreatePost" to="inclusiveJoin"/>
+			<sc:Transition id="t-role-join" from="branchCreateRole" to="inclusiveJoin"/>
+			<sc:Transition id="t-default-join" from="branchDefault" to="inclusiveJoin"/>
+			<!-- JOIN 直接到结束 -->
+			<sc:Transition id="t-join-end" from="inclusiveJoin" to="end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+</sc:Package>

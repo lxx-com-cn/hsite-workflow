@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" id="org-structure-dual-tx" name="双TX子流程组织初始化" version="5.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- ==================== Main Workflow: 双TX子流程 ==================== -->
+    <sc:Workflow id="main-dual-tx-process" name="主流程-双TX子流程组织初始化" version="5.0.0" type="MAIN" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="triggerFirstError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="triggerSecondError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="deptId" type="long" direction="OUT"/>
+            <sc:Parameter name="postResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+            <sc:Parameter name="userResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+            <sc:Parameter name="finalResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="main-createDept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- TX子流程1：岗位处理（独立事务） -->
+            <sc:Activity id="main-tx-post" name="TX子流程-岗位处理" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-structure-dual-tx" workflowId="sub-tx-post-process" version="5.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#triggerFirstError" target="#triggerError" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#subResult.postId" target="#postResult.postId" dataType="long"/>
+                        <sc:Output source="#subResult.postDetail" target="#postResult.postDetail"/>
+                        <sc:Output source="#subResult.message" target="#postResult.message" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="TX" timeout="30000">
+                        <sc:TransactionConfig propagation="REQUIRES_NEW" isolation="READ_COMMITTED" timeout="30" rollbackFor="java.lang.RuntimeException,java.lang.Exception"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+            <!-- TX子流程2：用户处理（独立事务） -->
+            <sc:Activity id="main-tx-user" name="TX子流程-用户处理" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-structure-dual-tx" workflowId="sub-tx-user-process" version="5.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#triggerSecondError" target="#triggerError" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#subResult.userId" target="#userResult.userId" dataType="long"/>
+                        <sc:Output source="#subResult.userDetail" target="#userResult.userDetail"/>
+                        <sc:Output source="#subResult.message" target="#userResult.message" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="TX" timeout="30000">
+                        <sc:TransactionConfig propagation="REQUIRES_NEW" isolation="READ_COMMITTED" timeout="30" rollbackFor="java.lang.RuntimeException,java.lang.Exception"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-verify-post" name="验证岗位数据可见性" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#result" target="#verifiedPost"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-verify-user" name="验证用户数据可见性" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#verifiedUser"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#deptId" target="#finalResult.deptId" dataType="long"/>
+                        <sc:Output source="#postId" target="#finalResult.firstTxPostId" dataType="long"/>
+                        <sc:Output source="#userId" target="#finalResult.secondTxUserId" dataType="long"/>
+                        <sc:Output source="#postResult" target="#finalResult.postResult"/>
+                        <sc:Output source="#userResult" target="#finalResult.userResult"/>
+                        <sc:Output source="#verifiedPost" target="#finalResult.verifiedPost"/>
+                        <sc:Output source="#verifiedUser" target="#finalResult.verifiedUser"/>
+                        <sc:Output source="'DUAL_TX_SUCCESS'" target="#finalResult.status" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="t1" from="main-start" to="main-createDept"/>
+            <sc:Transition id="t2" from="main-createDept" to="main-tx-post"/>
+            <sc:Transition id="t3" from="main-tx-post" to="main-tx-user"/>
+            <sc:Transition id="t4" from="main-tx-user" to="main-verify-post"/>
+            <sc:Transition id="t5" from="main-verify-post" to="main-verify-user"/>
+            <sc:Transition id="t6" from="main-verify-user" to="main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== TX Sub Workflow 1: 岗位处理 ==================== -->
+    <sc:Workflow id="sub-tx-post-process" name="TX子流程-岗位处理" version="5.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="triggerError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="txPost-start" name="TX岗位流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="txPost-create" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postRequest.name" target="#postRequest.name" dataType="string"/>
+                        <!-- 当 triggerError 为 true 时，使用冲突编码，否则使用正常编码 -->
+                        <sc:Input source="#{ #triggerError == 'true' ? 'CONFLICT_POST' + #deptId : #postRequest.code }" target="#postRequest.code" dataType="string"/>
+                        <sc:Input source="#postRequest.status" target="#postRequest.status" dataType="int"/>
+                        <sc:Input source="#postRequest.sort" target="#postRequest.sort" dataType="int"/>
+                        <sc:Input source="#postRequest.remark" target="#postRequest.remark" dataType="string"/>
+                        <sc:Input source="#deptId" target="#postRequest.deptId" dataType="long"/>
+                        <sc:Output source="#result" target="#postId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- 移除模拟任务，直接进入查询 -->
+            <sc:Activity id="txPost-query" name="查询岗位详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#result" target="#subResult.postDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="txPost-end" name="TX岗位流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#postId" target="#subResult.postId" dataType="long"/>
+                        <sc:Output source="#subResult.postDetail" target="#subResult.postDetail"/>
+                        <sc:Output source="'TX_POST_SUCCESS'" target="#subResult.message" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="stp1" from="txPost-start" to="txPost-create"/>
+            <sc:Transition id="stp3" from="txPost-create" to="txPost-query"/>
+            <sc:Transition id="stp4" from="txPost-query" to="txPost-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== TX Sub Workflow 2: 用户处理 ==================== -->
+    <sc:Workflow id="sub-tx-user-process" name="TX子流程-用户处理" version="5.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="postId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="triggerError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="txUser-start" name="TX用户流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="txUser-create" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 当 triggerError 为 true 时，使用冲突用户名，否则使用正常用户名 -->
+                        <sc:Input source="#{ #triggerError == 'true' ? 'CONFLICT_USER' + #deptId : #userRequest.username }" target="#userRequest.username" dataType="string"/>
+                        <sc:Input source="#userRequest.nickname" target="#userRequest.nickname" dataType="string"/>
+                        <sc:Input source="#userRequest.password" target="#userRequest.password" dataType="string"/>
+                        <sc:Input source="#userRequest.sex" target="#userRequest.sex" dataType="int"/>
+                        <sc:Input source="#userRequest.mobile" target="#userRequest.mobile" dataType="string"/>
+                        <sc:Input source="#userRequest.email" target="#userRequest.email" dataType="string"/>
+                        <sc:Input source="#userRequest.status" target="#userRequest.status" dataType="int"/>
+                        <sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#userRequest.postIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Output source="#result" target="#userId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- 移除模拟任务，直接进入查询 -->
+            <sc:Activity id="txUser-query" name="查询用户详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#subResult.userDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="txUser-end" name="TX用户流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#userId" target="#subResult.userId" dataType="long"/>
+                        <sc:Output source="#subResult.userDetail" target="#subResult.userDetail"/>
+                        <sc:Output source="'TX_USER_SUCCESS'" target="#subResult.message" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="stu1" from="txUser-start" to="txUser-create"/>
+            <sc:Transition id="stu3" from="txUser-create" to="txUser-query"/>
+            <sc:Transition id="stu4" from="txUser-query" to="txUser-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 初始化流程：创建冲突岗位 ==================== -->
+    <sc:Workflow id="init-conflict-post" name="初始化-创建冲突岗位" version="5.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="postCode" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="postName" type="string" direction="IN" required="true"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="initPost-start" name="初始化开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="initPost-create" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postName" target="#postRequest.name" dataType="string"/>
+                        <sc:Input source="#postCode" target="#postRequest.code" dataType="string"/>
+                        <sc:Input source="0" target="#postRequest.status" dataType="int"/>
+                        <sc:Input source="999" target="#postRequest.sort" dataType="int"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="initPost-end" name="初始化结束" type="END_EVENT">
+                <sc:EndEvent/>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="ip1" from="initPost-start" to="initPost-create"/>
+            <sc:Transition id="ip2" from="initPost-create" to="initPost-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 初始化流程：创建冲突用户 ==================== -->
+    <sc:Workflow id="init-conflict-user" name="初始化-创建冲突用户" version="5.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="username" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="nickname" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="password" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="mobile" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="email" type="string" direction="IN" required="true"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="initUser-start" name="初始化开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="initUser-create" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#username" target="#userRequest.username" dataType="string"/>
+                        <sc:Input source="#nickname" target="#userRequest.nickname" dataType="string"/>
+                        <sc:Input source="#password" target="#userRequest.password" dataType="string"/>
+                        <sc:Input source="1" target="#userRequest.sex" dataType="int"/>
+                        <sc:Input source="#mobile" target="#userRequest.mobile" dataType="string"/>
+                        <sc:Input source="#email" target="#userRequest.email" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="initUser-end" name="初始化结束" type="END_EVENT">
+                <sc:EndEvent/>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="iu1" from="initUser-start" to="initUser-create"/>
+            <sc:Transition id="iu2" from="initUser-create" to="initUser-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

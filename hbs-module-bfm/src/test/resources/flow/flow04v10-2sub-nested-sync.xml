@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" id="org-permission-nested" name="组织权限嵌套子流程" version="4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+	<!-- ==================== Main Workflow ==================== -->
+	<sc:Workflow id="main-onboarding-process" name="主流程-新员工入职" version="4.0.0" type="MAIN" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+			<sc:Parameter name="onboardingResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+			<sc:Parameter name="permissionResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<sc:Activity id="main-createDept" name="创建部门" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="createDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#deptId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="main-subPostUser" name="调用子流程-岗位用户处理" type="SUB_PROCESS">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="org-permission-nested" workflowId="sub-postuser-process" version="4.0.0"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptId" target="#deptId" dataType="long"/>
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+						<sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+						<sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+						<sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+						<!-- ✅ 关键修复：子流程输出扁平化变量 -->
+						<sc:Output source="#subResult.postId" target="#postId"/>
+						<sc:Output source="#subResult.userId" target="#userId"/>
+						<sc:Output source="#subResult.roleId" target="#roleId"/>
+						<sc:Output source="#subResult.roleResult" target="#roleResult"/>
+					</sc:DataMapping>
+					<sc:ExecutionStrategy mode="SYNC" timeout="45000"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<sc:Activity id="main-queryPost" name="查询岗位详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="getPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postId" target="#postId" dataType="long"/>
+						<sc:Output source="#result" target="#onboardingResult.postDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="main-queryUser" name="查询用户详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="getUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userId" target="#userId" dataType="long"/>
+						<sc:Output source="#result" target="#onboardingResult.userDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="main-queryRole" name="查询角色详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="roleService" method="getRole"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleId" target="#roleId" dataType="long"/>
+						<sc:Output source="#result" target="#permissionResult.roleDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="main-validatePermission" name="验证权限分配" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="permissionService" method="hasAnyPermissions"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userId" target="#userId" dataType="long"/>
+						<!-- ✅ 修复：指定目标元素类型为String，让引擎自动完成 Set<Long> -> String[] 转换 -->
+						<sc:Input source="#menuIds" target="#permissions" dataType="set" beanClass="java.lang.String"/>
+						<sc:Output source="#result" target="#permissionResult.hasPermission"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#onboardingResult" target="#onboardingResult"/>
+						<sc:Output source="#permissionResult" target="#permissionResult"/>
+						<sc:Output source="'ONBOARDING_SUCCESS'" target="#onboardingResult.status"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="t1" from="main-start" to="main-createDept"/>
+			<sc:Transition id="t2" from="main-createDept" to="main-subPostUser"/>
+			<sc:Transition id="t3" from="main-subPostUser" to="main-queryPost"/>
+			<sc:Transition id="t4" from="main-queryPost" to="main-queryUser"/>
+			<sc:Transition id="t5" from="main-queryUser" to="main-queryRole"/>
+			<sc:Transition id="t6" from="main-queryRole" to="main-validatePermission"/>
+			<sc:Transition id="t7" from="main-validatePermission" to="main-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+	<!-- ==================== Sub Workflow 1 ==================== -->
+	<sc:Workflow id="sub-postuser-process" name="子流程-岗位用户处理" version="4.0.0" type="SUB" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+			<sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="subPU-start" name="子流程1开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<sc:Activity id="subPU-createPost" name="创建岗位" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="createPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#postId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subPU-queryPostList" name="验证岗位创建" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="getPostList"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postId" target="#ids" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Output source="#result" target="#postList"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subPU-subRolePerm" name="调用子流程-角色权限处理" type="SUB_PROCESS">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="org-permission-nested" workflowId="sub-roleperm-process" version="4.0.0"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+						<sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+						<!-- ✅ 关键修复：输出roleId到顶层 -->
+						<sc:Output source="#subResult.roleId" target="#roleId"/>
+						<sc:Output source="#subResult.roleDetail" target="#roleResult.roleDetail"/>
+						<sc:Output source="#subResult.permissionResult" target="#roleResult.permissionResult"/>
+					</sc:DataMapping>
+					<sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<sc:Activity id="subPU-createUser" name="创建用户" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="createUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+						<sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+						<sc:Input source="#postId" target="#userRequest.postIds" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Output source="#result" target="#userId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subPU-validateUserList" name="验证用户创建" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="validateUserList"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userId" target="#ids" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Output source="#result" target="#userValidationResult"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subPU-end" name="子流程1结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#postId" target="#subResult.postId"/>
+						<sc:Output source="#postList" target="#subResult.postList"/>
+						<sc:Output source="#userId" target="#subResult.userId"/>
+						<sc:Output source="#userValidationResult" target="#subResult.userValidationResult"/>
+						<sc:Output source="#roleId" target="#subResult.roleId"/>
+						<sc:Output source="#roleResult" target="#subResult.roleResult"/>
+						<sc:Output source="'POST_USER_SUCCESS'" target="#subResult.status"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="spu1" from="subPU-start" to="subPU-createPost"/>
+			<sc:Transition id="spu2" from="subPU-createPost" to="subPU-queryPostList"/>
+			<sc:Transition id="spu3" from="subPU-queryPostList" to="subPU-subRolePerm"/>
+			<sc:Transition id="spu4" from="subPU-subRolePerm" to="subPU-createUser"/>
+			<sc:Transition id="spu5" from="subPU-createUser" to="subPU-validateUserList"/>
+			<sc:Transition id="spu6" from="subPU-validateUserList" to="subPU-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+	<!-- ==================== Sub Workflow 2 ==================== -->
+	<sc:Workflow id="sub-roleperm-process" name="子流程-角色权限处理" version="4.0.0" type="SUB" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+			<sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="subRP-start" name="子流程2开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<sc:Activity id="subRP-createRole" name="创建角色" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="roleService" method="createRole"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+						<sc:Input source="1" target="#type" dataType="int"/>
+						<sc:Output source="#result" target="#roleId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subRP-assignMenu" name="分配角色菜单" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="permissionService" method="assignRoleMenu"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleId" target="#roleId" dataType="long"/>
+						<sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subRP-validatePermission" name="验证角色权限" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="roleService" method="getRole"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleId" target="#id" dataType="long"/>
+						<sc:Output source="#result" target="#roleDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<sc:Activity id="subRP-end" name="子流程2结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#roleId" target="#subResult.roleId"/>
+						<sc:Output source="#roleDetail" target="#subResult.roleDetail"/>
+						<sc:Output source="#menuIds" target="#subResult.permIds"/>
+						<sc:Output source="'ROLE_PERM_SUCCESS'" target="#subResult.status"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="srp1" from="subRP-start" to="subRP-createRole"/>
+			<sc:Transition id="srp2" from="subRP-createRole" to="subRP-assignMenu"/>
+			<sc:Transition id="srp3" from="subRP-assignMenu" to="subRP-validatePermission"/>
+			<sc:Transition id="srp4" from="subRP-validatePermission" to="subRP-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+</sc:Package>

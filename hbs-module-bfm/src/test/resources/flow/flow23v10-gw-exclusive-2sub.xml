@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography"
+            id="gw-exclusive-2sub-demo"
+            name="双子流程排他网关示例"
+            version="1.0.0"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- ==================== 主流程 ==================== -->
+    <sc:Workflow id="main-gw-2sub" name="主流程-双子流程排他网关" version="1.0.0" type="MAIN" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="userType" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="false"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="postType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="userSubType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="result" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <!-- 开始 -->
+            <sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <!-- 主流程排他网关 -->
+            <sc:Activity id="main-gateway" name="主流程网关" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <!-- ========== 分支1：VIP ========== -->
+            <sc:Activity id="main-vip-createDept" name="VIP-创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-vip-subPost" name="VIP-调用岗位子流程" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-2sub-demo" workflowId="sub-post-process" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#postType" target="#postType" dataType="string"/>
+                        <sc:Output source="#subResult.postId" target="#postId"/>
+                        <sc:Output source="#subResult.postDetail" target="#postDetail"/>
+                        <sc:Output source="#subResult.postBranch" target="#postBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-vip-subUser" name="VIP-调用用户子流程" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-2sub-demo" workflowId="sub-user-process" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#userSubType" target="#userSubType" dataType="string"/>
+                        <sc:Output source="#subResult.userId" target="#userId"/>
+                        <sc:Output source="#subResult.userDetail" target="#userDetail"/>
+                        <sc:Output source="#subResult.userBranch" target="#userBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-vip-mark" name="VIP分支标记" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'VIP'" target="#arg0"/>
+                        <sc:Output source="#result" target="#executedBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- ========== 分支2：NORMAL ========== -->
+            <!-- 普通用户不创建部门，直接调用子流程1和2，不传递deptId（子流程中已设为可选） -->
+            <sc:Activity id="main-normal-subPost" name="普通-调用岗位子流程" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-2sub-demo" workflowId="sub-post-process" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 不传递deptId，子流程将使用null -->
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#postType" target="#postType" dataType="string"/>
+                        <sc:Output source="#subResult.postId" target="#postId"/>
+                        <sc:Output source="#subResult.postDetail" target="#postDetail"/>
+                        <sc:Output source="#subResult.postBranch" target="#postBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-normal-subUser" name="普通-调用用户子流程" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-2sub-demo" workflowId="sub-user-process" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 不传递deptId，子流程将使用null -->
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#userSubType" target="#userSubType" dataType="string"/>
+                        <sc:Output source="#subResult.userId" target="#userId"/>
+                        <sc:Output source="#subResult.userDetail" target="#userDetail"/>
+                        <sc:Output source="#subResult.userBranch" target="#userBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-normal-mark" name="普通分支标记" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'NORMAL'" target="#arg0"/>
+                        <sc:Output source="#result" target="#executedBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- ========== 分支3：ENTERPRISE ========== -->
+            <sc:Activity id="main-ent-createDept" name="企业-创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-ent-subPost" name="企业-调用岗位子流程" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-2sub-demo" workflowId="sub-post-process" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#postType" target="#postType" dataType="string"/>
+                        <sc:Output source="#subResult.postId" target="#postId"/>
+                        <sc:Output source="#subResult.postDetail" target="#postDetail"/>
+                        <sc:Output source="#subResult.postBranch" target="#postBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-ent-subUser" name="企业-调用用户子流程" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="gw-exclusive-2sub-demo" workflowId="sub-user-process" version="1.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#userSubType" target="#userSubType" dataType="string"/>
+                        <sc:Output source="#subResult.userId" target="#userId"/>
+                        <sc:Output source="#subResult.userDetail" target="#userDetail"/>
+                        <sc:Output source="#subResult.userBranch" target="#userBranch"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-ent-mark" name="企业分支标记" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="'ENTERPRISE'" target="#arg0"/>
+                        <sc:Output source="#result" target="#executedBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <!-- 合并网关 -->
+            <sc:Activity id="main-merge" name="主流程合并" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <!-- 结束事件：构建最终结果 -->
+            <sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#executedBranch" target="#result.executedBranch"/>
+                        <sc:Output source="#deptId" target="#result.deptId"/>
+                        <sc:Output source="#postId" target="#result.postId"/>
+                        <sc:Output source="#postBranch" target="#result.postBranch"/>
+                        <sc:Output source="#userId" target="#result.userId"/>
+                        <sc:Output source="#userBranch" target="#result.userBranch"/>
+                        <sc:Output source="#postDetail" target="#result.postDetail"/>
+                        <sc:Output source="#userDetail" target="#result.userDetail"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="t-start-gateway" from="main-start" to="main-gateway"/>
+
+            <sc:Transition id="t-gateway-vip" from="main-gateway" to="main-vip-createDept" condition="#userType == 'VIP'" priority="10"/>
+            <sc:Transition id="t-gateway-normal" from="main-gateway" to="main-normal-subPost" condition="#userType == 'NORMAL'" priority="5"/>
+            <sc:Transition id="t-gateway-enterprise" from="main-gateway" to="main-ent-createDept" condition="#userType == 'ENTERPRISE'" priority="5"/>
+            <sc:Transition id="t-gateway-default" from="main-gateway" to="main-normal-subPost" default="true" priority="1"/>
+
+            <sc:Transition id="t-vip1" from="main-vip-createDept" to="main-vip-subPost"/>
+            <sc:Transition id="t-vip2" from="main-vip-subPost" to="main-vip-subUser"/>
+            <sc:Transition id="t-vip3" from="main-vip-subUser" to="main-vip-mark"/>
+            <sc:Transition id="t-vip4" from="main-vip-mark" to="main-merge"/>
+
+            <sc:Transition id="t-normal1" from="main-normal-subPost" to="main-normal-subUser"/>
+            <sc:Transition id="t-normal2" from="main-normal-subUser" to="main-normal-mark"/>
+            <sc:Transition id="t-normal3" from="main-normal-mark" to="main-merge"/>
+
+            <sc:Transition id="t-ent1" from="main-ent-createDept" to="main-ent-subPost"/>
+            <sc:Transition id="t-ent2" from="main-ent-subPost" to="main-ent-subUser"/>
+            <sc:Transition id="t-ent3" from="main-ent-subUser" to="main-ent-mark"/>
+            <sc:Transition id="t-ent4" from="main-ent-mark" to="main-merge"/>
+
+            <sc:Transition id="t-merge-end" from="main-merge" to="main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 子流程1：岗位处理 ==================== -->
+    <sc:Workflow id="sub-post-process" name="子流程-岗位处理" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="false"/>   <!-- 修改为非必填 -->
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="postType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="subPost-start" name="岗位子流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <sc:Activity id="subPost-gateway" name="岗位类型网关" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <sc:Activity id="subPost-standard" name="创建标准岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <!-- 如果deptId为null，则postRequest.deptId不会被设置 -->
+                        <sc:Input source="#deptId" target="#postRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#postId"/>
+                        <sc:Output source="'STANDARD'" target="#postBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="subPost-custom" name="创建自定义岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#postRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="99" target="#postRequest.sort" dataType="int"/>
+                        <sc:Output source="#result" target="#postId"/>
+                        <sc:Output source="'CUSTOM'" target="#postBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="subPost-merge" name="岗位子流程合并" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <sc:Activity id="subPost-query" name="查询岗位详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#result" target="#postDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="subPost-end" name="岗位子流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#postId" target="#subResult.postId"/>
+                        <sc:Output source="#postBranch" target="#subResult.postBranch"/>
+                        <sc:Output source="#postDetail" target="#subResult.postDetail"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="sp-start-gateway" from="subPost-start" to="subPost-gateway"/>
+            <sc:Transition id="sp-gateway-standard" from="subPost-gateway" to="subPost-standard" condition="#postType == 'STANDARD'" priority="10"/>
+            <sc:Transition id="sp-gateway-custom" from="subPost-gateway" to="subPost-custom" condition="#postType == 'CUSTOM'" priority="5"/>
+            <sc:Transition id="sp-gateway-default" from="subPost-gateway" to="subPost-standard" default="true" priority="1"/>
+            <sc:Transition id="sp-standard-merge" from="subPost-standard" to="subPost-merge"/>
+            <sc:Transition id="sp-custom-merge" from="subPost-custom" to="subPost-merge"/>
+            <sc:Transition id="sp-merge-query" from="subPost-merge" to="subPost-query"/>
+            <sc:Transition id="sp-query-end" from="subPost-query" to="subPost-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 子流程2：用户处理 ==================== -->
+    <sc:Workflow id="sub-user-process" name="子流程-用户处理" version="1.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="false"/>   <!-- 修改为非必填 -->
+            <sc:Parameter name="postId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userSubType" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+
+        <sc:Activities>
+            <sc:Activity id="subUser-start" name="用户子流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+
+            <sc:Activity id="subUser-gateway" name="用户类型网关" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="SPLIT"/>
+            </sc:Activity>
+
+            <sc:Activity id="subUser-normal" name="创建普通用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#userRequest.postIds = {#postId}" dataType="set"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#userId"/>
+                        <sc:Output source="'NORMAL'" target="#userBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="subUser-admin" name="创建管理员用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#userRequest.postIds = {#postId}" dataType="set"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="0" target="#userRequest.status" dataType="int"/>
+                        <sc:Output source="#result" target="#userId"/>
+                        <sc:Output source="'ADMIN'" target="#userBranch"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="subUser-merge" name="用户子流程合并" type="EXCLUSIVE_GATEWAY">
+                <sc:Gateway mode="JOIN"/>
+            </sc:Activity>
+
+            <sc:Activity id="subUser-query" name="查询用户详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#userDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+
+            <sc:Activity id="subUser-end" name="用户子流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#userId" target="#subResult.userId"/>
+                        <sc:Output source="#userBranch" target="#subResult.userBranch"/>
+                        <sc:Output source="#userDetail" target="#subResult.userDetail"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+
+        <sc:Transitions>
+            <sc:Transition id="su-start-gateway" from="subUser-start" to="subUser-gateway"/>
+            <sc:Transition id="su-gateway-normal" from="subUser-gateway" to="subUser-normal" condition="#userSubType == 'NORMAL'" priority="10"/>
+            <sc:Transition id="su-gateway-admin" from="subUser-gateway" to="subUser-admin" condition="#userSubType == 'ADMIN'" priority="5"/>
+            <sc:Transition id="su-gateway-default" from="subUser-gateway" to="subUser-normal" default="true" priority="1"/>
+            <sc:Transition id="su-normal-merge" from="subUser-normal" to="subUser-merge"/>
+            <sc:Transition id="su-admin-merge" from="subUser-admin" to="subUser-merge"/>
+            <sc:Transition id="su-merge-query" from="subUser-merge" to="subUser-query"/>
+            <sc:Transition id="su-query-end" from="subUser-query" to="subUser-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

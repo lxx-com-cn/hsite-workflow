@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" id="org-permission-nested-tx" name="嵌套TX子流程组织权限" version="6.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+
+    <!-- ==================== Main Workflow: 嵌套TX ==================== -->
+    <sc:Workflow id="main-nested-tx-process" name="主流程-嵌套TX子流程" version="6.0.0" type="MAIN" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="triggerOuterError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="triggerInnerError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="onboardingResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+            <sc:Parameter name="permissionResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="main-createDept" name="创建部门" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="deptService" method="createDept"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+                        <sc:Output source="#result" target="#deptId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- 外层TX子流程：岗位用户处理（独立事务） -->
+            <sc:Activity id="main-outer-tx" name="外层TX子流程-岗位用户处理" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-permission-nested-tx" workflowId="outer-tx-postuser-process" version="6.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#deptId" target="#deptId" dataType="long"/>
+                        <sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+                        <sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Input source="#triggerOuterError" target="#triggerOuterError" dataType="string" required="false"/>
+                        <sc:Input source="#triggerInnerError" target="#triggerInnerError" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#subResult.userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#subResult.outerTxMessage" target="#outerTxMessage" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="TX" timeout="45000">
+                        <sc:TransactionConfig propagation="REQUIRES_NEW" isolation="READ_COMMITTED" timeout="45" rollbackFor="java.lang.RuntimeException,java.lang.Exception"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+            <sc:Activity id="main-queryPost" name="查询岗位详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="getPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postId" target="#postId" dataType="long"/>
+                        <sc:Output source="#result" target="#onboardingResult.postDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-queryUser" name="查询用户详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="getUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userId" target="#userId" dataType="long"/>
+                        <sc:Output source="#result" target="#onboardingResult.userDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-queryRole" name="查询角色详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="getRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#result" target="#permissionResult.roleDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#onboardingResult" target="#onboardingResult"/>
+                        <sc:Output source="#permissionResult" target="#permissionResult"/>
+                        <sc:Output source="#outerTxMessage" target="#onboardingResult.outerTxMessage"/>
+                        <sc:Output source="'NESTED_TX_SUCCESS'" target="#onboardingResult.status" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="t1" from="main-start" to="main-createDept"/>
+            <sc:Transition id="t2" from="main-createDept" to="main-outer-tx"/>
+            <sc:Transition id="t3" from="main-outer-tx" to="main-queryPost"/>
+            <sc:Transition id="t4" from="main-queryPost" to="main-queryUser"/>
+            <sc:Transition id="t5" from="main-queryUser" to="main-queryRole"/>
+            <sc:Transition id="t6" from="main-queryRole" to="main-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== Outer TX Sub Workflow: 岗位用户处理（包含内层TX） ==================== -->
+    <sc:Workflow id="outer-tx-postuser-process" name="外层TX子流程-岗位用户处理" version="6.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="deptId" type="long" direction="IN" required="true"/>
+            <sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="triggerOuterError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="triggerInnerError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="outerTx-start" name="外层TX开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="outerTx-createPost" name="创建岗位" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="postService" method="createPost"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#postRequest.name" target="#postRequest.name" dataType="string"/>
+                        <sc:Input source="#postRequest.code" target="#postRequest.code" dataType="string"/>
+                        <sc:Input source="#postRequest.status" target="#postRequest.status" dataType="int"/>
+                        <sc:Input source="#postRequest.sort" target="#postRequest.sort" dataType="int"/>
+                        <sc:Input source="#deptId" target="#postRequest.deptId" dataType="long"/>
+                        <sc:Output source="#result" target="#postId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <!-- 内层TX子流程：角色权限处理（独立事务，嵌套在外层TX中） -->
+            <sc:Activity id="outerTx-inner-tx-role" name="内层TX子流程-角色权限处理" type="SUB_PROCESS">
+                <sc:SubProcess>
+                    <sc:WorkflowRef packageId="org-permission-nested-tx" workflowId="inner-tx-roleperm-process" version="6.0.0"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                        <!-- 传递触发参数，内层子流程根据此参数决定是否使用冲突 code -->
+                        <sc:Input source="#triggerInnerError" target="#triggerError" dataType="string" required="false"/>
+                        <sc:Output source="#subResult.roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#subResult.roleDetail" target="#roleDetail"/>
+                        <sc:Output source="#subResult.innerTxMessage" target="#innerTxMessage" dataType="string"/>
+                    </sc:DataMapping>
+                    <sc:ExecutionStrategy mode="TX" timeout="30000">
+                        <sc:TransactionConfig propagation="REQUIRES_NEW" isolation="READ_COMMITTED" timeout="30" rollbackFor="java.lang.RuntimeException,java.lang.Exception"/>
+                    </sc:ExecutionStrategy>
+                </sc:SubProcess>
+            </sc:Activity>
+            <!-- 创建用户（直接使用传入的 userRequest，不再动态构造） -->
+            <sc:Activity id="outerTx-createUser" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#userRequest.username" target="#userRequest.username" dataType="string"/>
+                        <sc:Input source="#userRequest.nickname" target="#userRequest.nickname" dataType="string"/>
+                        <sc:Input source="#userRequest.password" target="#userRequest.password" dataType="string"/>
+                        <sc:Input source="#userRequest.sex" target="#userRequest.sex" dataType="int"/>
+                        <sc:Input source="#userRequest.mobile" target="#userRequest.mobile" dataType="string"/>
+                        <sc:Input source="#userRequest.email" target="#userRequest.email" dataType="string"/>
+                        <sc:Input source="#userRequest.status" target="#userRequest.status" dataType="int"/>
+                        <sc:Input source="#deptId" target="#userRequest.deptId" dataType="long"/>
+                        <sc:Input source="#postId" target="#userRequest.postIds" dataType="set" beanClass="java.lang.Long"/>
+                        <sc:Output source="#result" target="#userId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="outerTx-end" name="外层TX结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#postId" target="#subResult.postId" dataType="long"/>
+                        <sc:Output source="#userId" target="#subResult.userId" dataType="long"/>
+                        <sc:Output source="#roleId" target="#subResult.roleId" dataType="long"/>
+                        <sc:Output source="#roleDetail" target="#subResult.roleDetail"/>
+                        <sc:Output source="#innerTxMessage" target="#subResult.innerTxMessage" dataType="string"/>
+                        <sc:Output source="'OUTER_TX_SUCCESS'" target="#subResult.outerTxMessage" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="ot1" from="outerTx-start" to="outerTx-createPost"/>
+            <sc:Transition id="ot2" from="outerTx-createPost" to="outerTx-inner-tx-role"/>
+            <sc:Transition id="ot3" from="outerTx-inner-tx-role" to="outerTx-createUser"/>
+            <sc:Transition id="ot4" from="outerTx-createUser" to="outerTx-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== Inner TX Sub Workflow: 角色权限处理 ==================== -->
+    <sc:Workflow id="inner-tx-roleperm-process" name="内层TX子流程-角色权限处理" version="6.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+            <sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+            <sc:Parameter name="triggerError" type="string" direction="IN" required="false"/>
+            <sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="innerTx-start" name="内层TX开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <!-- 创建角色（直接使用传入的 roleRequest.code，不再动态构造） -->
+            <sc:Activity id="innerTx-createRole" name="创建角色" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="createRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleRequest.name" target="#roleRequest.name" dataType="string"/>
+                        <sc:Input source="#roleRequest.code" target="#roleRequest.code" dataType="string"/>
+                        <sc:Input source="#roleRequest.sort" target="#roleRequest.sort" dataType="int"/>
+                        <sc:Input source="#roleRequest.status" target="#roleRequest.status" dataType="int"/>
+                        <sc:Input source="1" target="#type" dataType="int"/>
+                        <sc:Output source="#result" target="#roleId" dataType="long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="innerTx-assignMenu" name="分配角色菜单" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="permissionService" method="assignRoleMenu"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="innerTx-queryRole" name="查询角色详情" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="getRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleId" target="#roleId" dataType="long"/>
+                        <sc:Output source="#result" target="#subResult.roleDetail"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="innerTx-end" name="内层TX结束" type="END_EVENT">
+                <sc:EndEvent>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Output source="#roleId" target="#subResult.roleId" dataType="long"/>
+                        <sc:Output source="#subResult.roleDetail" target="#subResult.roleDetail"/>
+                        <sc:Output source="#menuIds" target="#subResult.permIds"/>
+                        <sc:Output source="'INNER_TX_SUCCESS'" target="#subResult.innerTxMessage" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:EndEvent>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="it1" from="innerTx-start" to="innerTx-createRole"/>
+            <sc:Transition id="it2" from="innerTx-createRole" to="innerTx-assignMenu"/>
+            <sc:Transition id="it3" from="innerTx-assignMenu" to="innerTx-queryRole"/>
+            <sc:Transition id="it4" from="innerTx-queryRole" to="innerTx-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 初始化流程：创建冲突角色 ==================== -->
+    <sc:Workflow id="init-conflict-role" name="初始化-创建冲突角色" version="6.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="roleCode" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="roleName" type="string" direction="IN" required="true"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="initRole-start" name="初始化开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="initRole-create" name="创建角色" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="roleService" method="createRole"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#roleName" target="#roleRequest.name" dataType="string"/>
+                        <sc:Input source="#roleCode" target="#roleRequest.code" dataType="string"/>
+                        <sc:Input source="999" target="#roleRequest.sort" dataType="int"/>
+                        <sc:Input source="0" target="#roleRequest.status" dataType="int"/>
+                        <sc:Input source="1" target="#type" dataType="int"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="initRole-end" name="初始化结束" type="END_EVENT">
+                <sc:EndEvent/>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="ir1" from="initRole-start" to="initRole-create"/>
+            <sc:Transition id="ir2" from="initRole-create" to="initRole-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+
+    <!-- ==================== 初始化流程：创建冲突用户 ==================== -->
+    <sc:Workflow id="init-conflict-user" name="初始化-创建冲突用户" version="6.0.0" type="SUB" contractMode="STRICT">
+        <sc:Parameters>
+            <sc:Parameter name="username" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="nickname" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="password" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="mobile" type="string" direction="IN" required="true"/>
+            <sc:Parameter name="email" type="string" direction="IN" required="true"/>
+        </sc:Parameters>
+        <sc:Activities>
+            <sc:Activity id="initUser-start" name="初始化开始" type="START_EVENT">
+                <sc:StartEvent/>
+            </sc:Activity>
+            <sc:Activity id="initUser-create" name="创建用户" type="AUTO_TASK">
+                <sc:AutoTask>
+                    <sc:SpringBean beanName="adminUserService" method="createUser"/>
+                    <sc:DataMapping scope="WORKFLOW">
+                        <sc:Input source="#username" target="#userRequest.username" dataType="string"/>
+                        <sc:Input source="#nickname" target="#userRequest.nickname" dataType="string"/>
+                        <sc:Input source="#password" target="#userRequest.password" dataType="string"/>
+                        <sc:Input source="1" target="#userRequest.sex" dataType="int"/>
+                        <sc:Input source="#mobile" target="#userRequest.mobile" dataType="string"/>
+                        <sc:Input source="#email" target="#userRequest.email" dataType="string"/>
+                    </sc:DataMapping>
+                </sc:AutoTask>
+            </sc:Activity>
+            <sc:Activity id="initUser-end" name="初始化结束" type="END_EVENT">
+                <sc:EndEvent/>
+            </sc:Activity>
+        </sc:Activities>
+        <sc:Transitions>
+            <sc:Transition id="iu1" from="initUser-start" to="initUser-create"/>
+            <sc:Transition id="iu2" from="initUser-create" to="initUser-end"/>
+        </sc:Transitions>
+    </sc:Workflow>
+</sc:Package>

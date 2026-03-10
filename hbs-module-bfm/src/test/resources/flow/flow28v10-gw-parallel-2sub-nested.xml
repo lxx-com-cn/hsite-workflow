@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sc:Package xmlns:sc="http://www.example.com/service-choreography" id="gw-parallel-nested-demo" name="并行网关-三层嵌套示例" version="1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.example.com/service-choreography workflow-v10.xsd">
+	<!-- ==================== 主流程 ==================== -->
+	<sc:Workflow id="main-parallel-nested" name="主流程-并行三层嵌套" version="1.0.0" type="MAIN" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="deptRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.dept.DeptSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+			<sc:Parameter name="result" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<!-- 开始 -->
+			<sc:Activity id="main-start" name="主流程开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<!-- 主流程并行网关 SPLIT -->
+			<sc:Activity id="main-split" name="主流程并行开始" type="PARALLEL_GATEWAY">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 分支1：创建部门 -->
+			<sc:Activity id="main-createDept" name="创建部门" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="createDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptRequest" target="#deptRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#deptId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 分支2：调用岗位子流程 -->
+			<sc:Activity id="main-subPost" name="调用岗位子流程" type="SUB_PROCESS">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="gw-parallel-nested-demo" workflowId="sub-post-process" version="1.0.0"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+						<sc:Output source="#subResult.postId" target="#postId"/>
+						<sc:Output source="#subResult.postDetail" target="#postDetail"/>
+					</sc:DataMapping>
+					<sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 分支3：调用用户子流程（内部嵌套角色子流程） -->
+			<sc:Activity id="main-subUser" name="调用用户子流程" type="SUB_PROCESS">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="gw-parallel-nested-demo" workflowId="sub-user-process" version="1.0.0"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+						<sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+						<sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Output source="#subResult.userId" target="#userId"/>
+						<sc:Output source="#subResult.userDetail" target="#userDetail"/>
+						<sc:Output source="#subResult.roleId" target="#roleId"/>
+						<sc:Output source="#subResult.roleDetail" target="#roleDetail"/>
+					</sc:DataMapping>
+					<sc:ExecutionStrategy mode="SYNC" timeout="45000"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 主流程并行网关 JOIN -->
+			<sc:Activity id="main-join" name="主流程并行汇聚" type="PARALLEL_GATEWAY">
+				<sc:Gateway mode="JOIN"/>
+			</sc:Activity>
+			<!-- 查询部门详情（JOIN后执行） -->
+			<sc:Activity id="main-queryDept" name="查询部门详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="deptService" method="getDept"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#deptId" target="#id" dataType="long"/>
+						<sc:Output source="#result" target="#deptDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 结束事件：构建最终结果 -->
+			<sc:Activity id="main-end" name="主流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#deptId" target="#result.deptId"/>
+						<sc:Output source="#deptDetail" target="#result.deptDetail"/>
+						<sc:Output source="#postId" target="#result.postId"/>
+						<sc:Output source="#postDetail" target="#result.postDetail"/>
+						<sc:Output source="#userId" target="#result.userId"/>
+						<sc:Output source="#userDetail" target="#result.userDetail"/>
+						<sc:Output source="#roleId" target="#result.roleId"/>
+						<sc:Output source="#roleDetail" target="#result.roleDetail"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="t-start-split" from="main-start" to="main-split"/>
+			<sc:Transition id="t-split-createDept" from="main-split" to="main-createDept"/>
+			<sc:Transition id="t-split-subPost" from="main-split" to="main-subPost"/>
+			<sc:Transition id="t-split-subUser" from="main-split" to="main-subUser"/>
+			<sc:Transition id="t-createDept-join" from="main-createDept" to="main-join"/>
+			<sc:Transition id="t-subPost-join" from="main-subPost" to="main-join"/>
+			<sc:Transition id="t-subUser-join" from="main-subUser" to="main-join"/>
+			<sc:Transition id="t-join-queryDept" from="main-join" to="main-queryDept"/>
+			<sc:Transition id="t-queryDept-end" from="main-queryDept" to="main-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+	<!-- ==================== 子流程1：岗位处理 ==================== -->
+	<sc:Workflow id="sub-post-process" name="子流程-岗位处理" version="1.0.0" type="SUB" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="postRequest" type="bean" className="com.hbs.site.module.system.controller.admin.dept.vo.post.PostSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="subPost-start" name="岗位子流程开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<!-- 岗位子流程并行网关 SPLIT -->
+			<sc:Activity id="subPost-split" name="岗位子流程并行开始" type="PARALLEL_GATEWAY">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 分支1：创建岗位（实际业务） -->
+			<sc:Activity id="subPost-create" name="创建岗位" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="createPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postRequest" target="#postRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#postId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 分支2：岗位空任务（模拟并行分支） -->
+			<sc:Activity id="subPost-dummy" name="岗位空任务" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="'DUMMY'" target="#arg0"/>
+						<sc:Output source="#result" target="#dummyFlag"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 岗位子流程并行网关 JOIN -->
+			<sc:Activity id="subPost-join" name="岗位子流程并行汇聚" type="PARALLEL_GATEWAY">
+				<sc:Gateway mode="JOIN"/>
+			</sc:Activity>
+			<!-- 查询岗位详情 -->
+			<sc:Activity id="subPost-query" name="查询岗位详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="postService" method="getPost"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#postId" target="#id" dataType="long"/>
+						<sc:Output source="#result" target="#postDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 结束 -->
+			<sc:Activity id="subPost-end" name="岗位子流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#postId" target="#subResult.postId"/>
+						<sc:Output source="#postDetail" target="#subResult.postDetail"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="sp-start-split" from="subPost-start" to="subPost-split"/>
+			<sc:Transition id="sp-split-create" from="subPost-split" to="subPost-create"/>
+			<sc:Transition id="sp-split-dummy" from="subPost-split" to="subPost-dummy"/>
+			<sc:Transition id="sp-create-join" from="subPost-create" to="subPost-join"/>
+			<sc:Transition id="sp-dummy-join" from="subPost-dummy" to="subPost-join"/>
+			<sc:Transition id="sp-join-query" from="subPost-join" to="subPost-query"/>
+			<sc:Transition id="sp-query-end" from="subPost-query" to="subPost-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+	<!-- ==================== 子流程2：用户处理（嵌套角色子流程） ==================== -->
+	<sc:Workflow id="sub-user-process" name="子流程-用户处理" version="1.0.0" type="SUB" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="userRequest" type="bean" className="com.hbs.site.module.system.controller.admin.user.vo.user.UserSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+			<sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="subUser-start" name="用户子流程开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<!-- 用户子流程并行网关 SPLIT -->
+			<sc:Activity id="subUser-split" name="用户子流程并行开始" type="PARALLEL_GATEWAY">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 分支1：创建用户 -->
+			<sc:Activity id="subUser-create" name="创建用户" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="createUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userRequest" target="#userRequest" dataType="bean"/>
+						<sc:Output source="#result" target="#userId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 分支2：调用角色子流程 -->
+			<sc:Activity id="subUser-subRole" name="调用角色子流程" type="SUB_PROCESS">
+				<sc:SubProcess>
+					<sc:WorkflowRef packageId="gw-parallel-nested-demo" workflowId="sub-role-process" version="1.0.0"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleRequest" target="#roleRequest" dataType="bean"/>
+						<sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+						<sc:Output source="#subResult.roleId" target="#roleId"/>
+						<sc:Output source="#subResult.roleDetail" target="#roleDetail"/>
+					</sc:DataMapping>
+					<sc:ExecutionStrategy mode="SYNC" timeout="30000"/>
+				</sc:SubProcess>
+			</sc:Activity>
+			<!-- 用户子流程并行网关 JOIN -->
+			<sc:Activity id="subUser-join" name="用户子流程并行汇聚" type="PARALLEL_GATEWAY">
+				<sc:Gateway mode="JOIN"/>
+			</sc:Activity>
+			<!-- 查询用户详情 -->
+			<sc:Activity id="subUser-query" name="查询用户详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="adminUserService" method="getUser"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#userId" target="#id" dataType="long"/>
+						<sc:Output source="#result" target="#userDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 结束 -->
+			<sc:Activity id="subUser-end" name="用户子流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#userId" target="#subResult.userId"/>
+						<sc:Output source="#userDetail" target="#subResult.userDetail"/>
+						<sc:Output source="#roleId" target="#subResult.roleId"/>
+						<sc:Output source="#roleDetail" target="#subResult.roleDetail"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="su-start-split" from="subUser-start" to="subUser-split"/>
+			<sc:Transition id="su-split-create" from="subUser-split" to="subUser-create"/>
+			<sc:Transition id="su-split-subRole" from="subUser-split" to="subUser-subRole"/>
+			<sc:Transition id="su-create-join" from="subUser-create" to="subUser-join"/>
+			<sc:Transition id="su-subRole-join" from="subUser-subRole" to="subUser-join"/>
+			<sc:Transition id="su-join-query" from="subUser-join" to="subUser-query"/>
+			<sc:Transition id="su-query-end" from="subUser-query" to="subUser-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+	<!-- ==================== 子流程3：角色处理 ==================== -->
+	<sc:Workflow id="sub-role-process" name="子流程-角色处理" version="1.0.0" type="SUB" contractMode="STRICT">
+		<sc:Parameters>
+			<sc:Parameter name="roleRequest" type="bean" className="com.hbs.site.module.system.controller.admin.permission.vo.role.RoleSaveReqVO" direction="IN" required="true"/>
+			<sc:Parameter name="menuIds" type="set" className="java.util.HashSet" direction="IN" required="true"/>
+			<sc:Parameter name="subResult" type="bean" className="java.util.HashMap" direction="OUT"/>
+		</sc:Parameters>
+		<sc:Activities>
+			<sc:Activity id="subRole-start" name="角色子流程开始" type="START_EVENT">
+				<sc:StartEvent/>
+			</sc:Activity>
+			<!-- 角色子流程并行网关 SPLIT -->
+			<sc:Activity id="subRole-split" name="角色子流程并行开始" type="PARALLEL_GATEWAY">
+				<sc:Gateway mode="SPLIT"/>
+			</sc:Activity>
+			<!-- 分支1：创建角色 -->
+			<sc:Activity id="subRole-create" name="创建角色" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="roleService" method="createRole"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleRequest" target="#createReqVO" dataType="bean"/>
+						<sc:Input source="1" target="#type" dataType="int"/>
+						<!-- 角色类型，例如 1=自定义 -->
+						<sc:Output source="#result" target="#roleId"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 分支2：角色空任务（模拟并行分支） -->
+			<sc:Activity id="subRole-dummy" name="角色空任务" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:JavaBean class="java.lang.String" method="valueOf" static="true"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="'ROLE_DUMMY'" target="#arg0"/>
+						<sc:Output source="#result" target="#dummyFlag"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 角色子流程并行网关 JOIN -->
+			<sc:Activity id="subRole-join" name="角色子流程并行汇聚" type="PARALLEL_GATEWAY">
+				<sc:Gateway mode="JOIN"/>
+			</sc:Activity>
+			<!-- 分配菜单权限（依赖 roleId） -->
+			<sc:Activity id="subRole-assignMenu" name="分配菜单权限" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="permissionService" method="assignRoleMenu"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleId" target="#roleId" dataType="long"/>
+						<sc:Input source="#menuIds" target="#menuIds" dataType="set" beanClass="java.lang.Long"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 查询角色详情 -->
+			<sc:Activity id="subRole-query" name="查询角色详情" type="AUTO_TASK">
+				<sc:AutoTask>
+					<sc:SpringBean beanName="roleService" method="getRole"/>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Input source="#roleId" target="#id" dataType="long"/>
+						<sc:Output source="#result" target="#roleDetail"/>
+					</sc:DataMapping>
+				</sc:AutoTask>
+			</sc:Activity>
+			<!-- 结束 -->
+			<sc:Activity id="subRole-end" name="角色子流程结束" type="END_EVENT">
+				<sc:EndEvent>
+					<sc:DataMapping scope="WORKFLOW">
+						<sc:Output source="#roleId" target="#subResult.roleId"/>
+						<sc:Output source="#roleDetail" target="#subResult.roleDetail"/>
+					</sc:DataMapping>
+				</sc:EndEvent>
+			</sc:Activity>
+		</sc:Activities>
+		<sc:Transitions>
+			<sc:Transition id="sr-start-split" from="subRole-start" to="subRole-split"/>
+			<sc:Transition id="sr-split-create" from="subRole-split" to="subRole-create"/>
+			<sc:Transition id="sr-split-dummy" from="subRole-split" to="subRole-dummy"/>
+			<sc:Transition id="sr-create-join" from="subRole-create" to="subRole-join"/>
+			<sc:Transition id="sr-dummy-join" from="subRole-dummy" to="subRole-join"/>
+			<sc:Transition id="sr-join-assign" from="subRole-join" to="subRole-assignMenu"/>
+			<sc:Transition id="sr-assign-query" from="subRole-assignMenu" to="subRole-query"/>
+			<sc:Transition id="sr-query-end" from="subRole-query" to="subRole-end"/>
+		</sc:Transitions>
+	</sc:Workflow>
+</sc:Package>

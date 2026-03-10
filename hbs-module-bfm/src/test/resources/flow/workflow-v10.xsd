@@ -1,0 +1,790 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 被2012 () 使用XMLSpy v编辑的 (http://www.altova.com ) by -->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:sc="http://www.example.com/service-choreography" targetNamespace="http://www.example.com/service-choreography" elementFormDefault="qualified" attributeFormDefault="unqualified">
+    <!-- ========== 1. 基础类型 ========== -->
+    <xs:simpleType name="VersionType">
+        <xs:restriction base="xs:string">
+            <xs:pattern value="\d+\.\d+\.\d+(-[a-zA-Z0-9]+)?"/>
+        </xs:restriction>
+    </xs:simpleType>
+    
+    <!-- 数据类型枚举（最终版） -->
+    <xs:simpleType name="DataType">
+        <xs:restriction base="xs:string">
+            <!-- 简单类型 -->
+            <xs:enumeration value="string"/>
+            <xs:enumeration value="int"/>
+            <xs:enumeration value="long"/>
+            <xs:enumeration value="double"/>
+            <xs:enumeration value="boolean"/>
+            <xs:enumeration value="date"/>
+            <xs:enumeration value="datetime"/>
+            <!-- 复合类型 -->
+            <xs:enumeration value="bean"/>
+            <xs:enumeration value="list"/>
+            <xs:enumeration value="map"/>
+            <xs:enumeration value="set"/>
+        </xs:restriction>
+    </xs:simpleType>
+    
+    <xs:simpleType name="ConverterType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="stringToInt"/>
+            <xs:enumeration value="stringToLong"/>
+            <xs:enumeration value="jsonToObject"/>
+            <xs:enumeration value="objectToJson"/>
+            <xs:enumeration value="dateFormat"/>
+            <xs:enumeration value="base64Encode"/>
+            <xs:enumeration value="base64Decode"/>
+            <xs:enumeration value="custom"/>
+        </xs:restriction>
+    </xs:simpleType>
+    
+    <xs:simpleType name="ExpressionLanguageType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="SpEL"/>
+            <xs:enumeration value="MVEL"/>
+            <xs:enumeration value="JUEL"/>
+            <xs:enumeration value="QLExpress"/>
+            <xs:enumeration value="JavaScript"/>
+        </xs:restriction>
+    </xs:simpleType>
+    
+    <!-- 锚点类型 -->
+    <xs:simpleType name="AnchorType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="TOP"/>
+            <xs:enumeration value="BOTTOM"/>
+            <xs:enumeration value="LEFT"/>
+            <xs:enumeration value="RIGHT"/>
+            <xs:enumeration value="CENTER"/>
+        </xs:restriction>
+    </xs:simpleType>
+    
+    <!-- 执行模式类型 -->
+    <xs:simpleType name="ExecutionModeType">
+        <xs:restriction base="xs:string">
+            <xs:enumeration value="SYNC"/>
+            <xs:enumeration value="TX"/>
+            <xs:enumeration value="ASYNC"/>
+            <xs:enumeration value="FUTURE"/>
+            <xs:enumeration value="FORKJOIN"/>
+        </xs:restriction>
+    </xs:simpleType>
+    
+    <!-- ========== 2. 消息 ========== -->
+    <xs:complexType name="MessageType">
+        <xs:attribute name="id" type="xs:string" use="required"/>
+        <xs:attribute name="name" type="xs:string"/>
+        <xs:attribute name="channel" type="xs:string"/>
+        <xs:attribute name="payloadType" type="xs:string" default="JSON"/>
+        <xs:attribute name="serialization" type="xs:string" default="JSON"/>
+    </xs:complexType>
+    
+    <!-- ========== 3. 数据映射 ========== -->
+    <xs:complexType name="DataMapping">
+        <xs:sequence>
+            <xs:element name="Input" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="source" type="xs:string" use="required"/>
+                    <xs:attribute name="target" type="xs:string" use="required"/>
+                    <xs:attribute name="dataType" type="sc:DataType"/>
+                    <xs:attribute name="converter" type="sc:ConverterType"/>
+                    <xs:attribute name="customConverter" type="xs:string"/>
+                    <xs:attribute name="beanClass" type="xs:string"/>
+                    <xs:attribute name="format" type="xs:string"/>
+                    <xs:attribute name="required" type="xs:boolean" default="false"/>
+                    <xs:attribute name="defaultValue" type="xs:string"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="Output" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="source" type="xs:string" use="required"/>
+                    <xs:attribute name="target" type="xs:string" use="required"/>
+                    <xs:attribute name="dataType" type="sc:DataType"/>
+                    <xs:attribute name="beanClass" type="xs:string"/>
+                    <xs:attribute name="persist" type="xs:boolean" default="true"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+        <xs:attribute name="strategy" default="OVERRIDE">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="OVERRIDE"/>
+                    <xs:enumeration value="MERGE"/>
+                    <xs:enumeration value="DEEP_MERGE"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="scope" default="LOCAL">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="LOCAL"/>
+                    <xs:enumeration value="WORKFLOW"/>
+                    <xs:enumeration value="PACKAGE"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="lazy" type="xs:boolean" default="false"/>
+    </xs:complexType>
+    
+    <!-- ========== 4. 异常处理 ========== -->
+    <xs:complexType name="FaultHandler">
+        <xs:sequence>
+            <xs:element name="RetryPolicy" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="maxAttempts" type="xs:positiveInteger" default="3"/>
+                    <xs:attribute name="backoff" type="xs:positiveInteger" default="1000"/>
+                    <xs:attribute name="backoffMultiplier" type="xs:decimal" default="2.0"/>
+                    <xs:attribute name="maxBackoff" type="xs:positiveInteger" default="60000"/>
+                    <xs:attribute name="idempotent" type="xs:boolean" default="true"/>
+                    <xs:attribute name="retryOn" type="xs:string" default="#{exception instanceof T(java.lang.Exception)}"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="Catch" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="exception" type="xs:string" use="required"/>
+                    <xs:attribute name="transitionTo" type="xs:string"/>
+                    <xs:attribute name="logLevel" default="ERROR">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="DEBUG"/>
+                                <xs:enumeration value="INFO"/>
+                                <xs:enumeration value="WARN"/>
+                                <xs:enumeration value="ERROR"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="Compensation" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="compensateTo" type="xs:string" use="required"/>
+                    <xs:attribute name="strategy" default="ROLLBACK">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="ROLLBACK"/>
+                                <xs:enumeration value="COMPENSATE"/>
+                                <xs:enumeration value="CONTINUE"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="Snapshot" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="enabled" type="xs:boolean" default="true"/>
+                    <xs:attribute name="includeVariables" type="xs:boolean" default="true"/>
+                    <xs:attribute name="includeData" type="xs:boolean" default="false"/>
+                    <xs:attribute name="storageRef" type="xs:string" default="snapshotStore"/>
+                    <xs:attribute name="snapshotData" type="xs:string"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+        <xs:attribute name="timeout" type="xs:positiveInteger"/>
+        <xs:attribute name="timeoutTransitionTo" type="xs:string"/>
+    </xs:complexType>
+    
+    <!-- ========== 5. 执行策略配置 ========== -->
+    <xs:complexType name="ExecutionStrategy">
+        <xs:sequence>
+            <!-- 线程池配置 -->
+            <xs:element name="ThreadPool" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="coreSize" type="xs:positiveInteger" default="10"/>
+                    <xs:attribute name="maxSize" type="xs:positiveInteger" default="50"/>
+                    <xs:attribute name="queueCapacity" type="xs:positiveInteger" default="1000"/>
+                    <xs:attribute name="keepAliveSeconds" type="xs:positiveInteger" default="60"/>
+                    <xs:attribute name="threadNamePrefix" type="xs:string" default="bfm-exec-"/>
+                </xs:complexType>
+            </xs:element>
+            <!-- CompletableFuture特定配置 -->
+            <xs:element name="FutureConfig" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="dependencyType" default="ALL">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="ALL"/>
+                                <xs:enumeration value="ANY"/>
+                                <xs:enumeration value="MUST"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                    <xs:attribute name="callbackEnabled" type="xs:boolean" default="true"/>
+                    <xs:attribute name="skipOnNextRunning" type="xs:boolean" default="true"/>
+                    <xs:attribute name="defaultValueOnException" type="xs:string"/>
+                </xs:complexType>
+            </xs:element>
+            <!-- ForkJoin特定配置 -->
+            <xs:element name="ForkJoinConfig" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="parallelism" type="xs:integer" default="-1"/>
+                    <xs:attribute name="asyncMode" type="xs:boolean" default="false"/>
+                    <xs:attribute name="threshold" type="xs:positiveInteger" default="1000"/>
+                    <xs:attribute name="batchSize" type="xs:positiveInteger" default="100"/>
+                </xs:complexType>
+            </xs:element>
+            <!-- 事务配置 -->
+            <xs:element name="TransactionConfig" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="propagation" default="REQUIRED">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="REQUIRED"/>
+                                <xs:enumeration value="REQUIRES_NEW"/>
+                                <xs:enumeration value="NESTED"/>
+                                <xs:enumeration value="SUPPORTS"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                    <xs:attribute name="isolation" default="DEFAULT">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="DEFAULT"/>
+                                <xs:enumeration value="READ_UNCOMMITTED"/>
+                                <xs:enumeration value="READ_COMMITTED"/>
+                                <xs:enumeration value="REPEATABLE_READ"/>
+                                <xs:enumeration value="SERIALIZABLE"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                    <xs:attribute name="timeout" type="xs:positiveInteger" default="30"/>
+                    <xs:attribute name="rollbackFor" type="xs:string" default="java.lang.Exception"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+        <xs:attribute name="mode" type="sc:ExecutionModeType" use="required"/>
+        <xs:attribute name="timeout" type="xs:positiveInteger"/>
+        <xs:attribute name="name" type="xs:string"/>
+        <xs:attribute name="description" type="xs:string"/>
+    </xs:complexType>
+    
+    <!-- ========== 6. 调试 & 监控 ========== -->
+    <xs:complexType name="DebugProfile">
+        <xs:attribute name="enabled" type="xs:boolean" default="false"/>
+        <xs:attribute name="logLevel" default="INFO">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="DEBUG"/>
+                    <xs:enumeration value="INFO"/>
+                    <xs:enumeration value="WARN"/>
+                    <xs:enumeration value="ERROR"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="traceVariables" type="xs:boolean" default="true"/>
+        <xs:attribute name="recordExecutionPath" type="xs:boolean" default="true"/>
+        <xs:attribute name="persistExecutionData" type="xs:boolean" default="true"/>
+        <xs:attribute name="traceIdHeader" type="xs:string" default="X-Trace-Id"/>
+    </xs:complexType>
+    
+    <xs:complexType name="MonitoringProfile">
+        <xs:sequence>
+            <xs:element name="Metric" minOccurs="0" maxOccurs="unbounded">
+                <xs:complexType>
+                    <xs:attribute name="name" type="xs:string" use="required"/>
+                    <xs:attribute name="type" use="required">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="COUNTER"/>
+                                <xs:enumeration value="TIMER"/>
+                                <xs:enumeration value="GAUGE"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                    <xs:attribute name="activityRef" type="xs:string"/>
+                </xs:complexType>
+            </xs:element>
+        </xs:sequence>
+        <xs:attribute name="enabled" type="xs:boolean" default="true"/>
+    </xs:complexType>
+    
+    <!-- ========== 7. 部署配置 ========== -->
+    <xs:complexType name="DeploymentProfile">
+        <xs:attribute name="mode" default="SINGLE">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="SINGLE"/>
+                    <xs:enumeration value="CLUSTER"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="instanceStrategy" default="ON_DEMAND">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="ON_DEMAND"/>
+                    <xs:enumeration value="PRELOAD"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="resourceGroup" type="xs:string" default="default"/>
+        <xs:attribute name="preload" type="xs:boolean" default="false"/>
+        <xs:attribute name="cacheable" type="xs:boolean" default="true"/>
+    </xs:complexType>
+    
+    <!-- ========== 8. 自动任务 ========== -->
+    <xs:complexType name="AutoTask">
+        <xs:sequence>
+            <xs:choice>
+                <xs:element name="REST">
+                    <xs:complexType>
+                        <xs:attribute name="endpoint" type="xs:anyURI" use="required"/>
+                        <xs:attribute name="method" default="POST">
+                            <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                    <xs:enumeration value="GET"/>
+                                    <xs:enumeration value="POST"/>
+                                    <xs:enumeration value="PUT"/>
+                                    <xs:enumeration value="DELETE"/>
+                                    <xs:enumeration value="PATCH"/>
+                                </xs:restriction>
+                            </xs:simpleType>
+                        </xs:attribute>
+                        <xs:attribute name="headers" type="xs:string"/>
+                        <xs:attribute name="timeout" type="xs:positiveInteger" default="30000"/>
+                        <xs:attribute name="retryable" type="xs:boolean" default="true"/>
+                        <!-- 新增：序列化格式 -->
+                        <xs:attribute name="format" default="JSON">
+                            <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                    <xs:enumeration value="JSON"/>
+                                    <xs:enumeration value="XML"/>
+                                    <xs:enumeration value="FORM"/>
+                                </xs:restriction>
+                            </xs:simpleType>
+                        </xs:attribute>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="WebService">
+                    <xs:complexType>
+                        <xs:attribute name="wsdl" type="xs:anyURI" use="required"/>
+                        <xs:attribute name="operation" type="xs:string" use="required"/>
+                        <xs:attribute name="port" type="xs:string"/>
+                        <xs:attribute name="timeout" type="xs:positiveInteger" default="30000"/>
+                        <!-- 新增：编码格式 -->
+                        <xs:attribute name="encoding" default="XML">
+                            <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                    <xs:enumeration value="XML"/>
+                                    <xs:enumeration value="SOAP11"/>
+                                    <xs:enumeration value="SOAP12"/>
+                                </xs:restriction>
+                            </xs:simpleType>
+                        </xs:attribute>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="JavaBean">
+                    <xs:complexType>
+                        <xs:attribute name="class" type="xs:string" use="required"/>
+                        <xs:attribute name="method" type="xs:string" use="required"/>
+                        <xs:attribute name="static" type="xs:boolean" default="false"/>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="SpringBean">
+                    <xs:complexType>
+                        <xs:attribute name="beanName" type="xs:string" use="required"/>
+                        <xs:attribute name="method" type="xs:string" use="required"/>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="Message">
+                    <xs:complexType>
+                        <xs:attribute name="channel" type="xs:string" use="required"/>
+                        <xs:attribute name="topic" type="xs:string"/>
+                        <xs:attribute name="messageType" type="xs:string" default="JSON"/>
+                    </xs:complexType>
+                </xs:element>
+            </xs:choice>
+            <xs:element name="DataMapping" type="sc:DataMapping" minOccurs="0"/>
+            <xs:element name="FaultHandler" type="sc:FaultHandler" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="async" type="xs:boolean" default="false"/>
+        <xs:attribute name="priority" type="xs:integer" default="5"/>
+        <xs:attribute name="runIsolated" type="xs:boolean" default="false"/>
+    </xs:complexType>
+    
+    <!-- ========== 9. 人工任务 ========== -->
+    <xs:complexType name="UserTask">
+        <xs:sequence>
+            <xs:element name="Assignment">
+                <xs:complexType>
+                    <xs:choice maxOccurs="unbounded">
+                        <xs:element name="User" type="xs:string"/>
+                        <xs:element name="Role" type="xs:string"/>
+                        <xs:element name="Group" type="xs:string"/>
+                        <xs:element name="Expression">
+                            <xs:complexType>
+                                <xs:attribute name="value" type="xs:string" use="required"/>
+                                <xs:attribute name="language" type="sc:ExpressionLanguageType" default="SpEL"/>
+                            </xs:complexType>
+                        </xs:element>
+                    </xs:choice>
+                    <xs:attribute name="strategy" default="FIXED">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="FIXED"/>
+                                <xs:enumeration value="CLAIM"/>
+                                <xs:enumeration value="ROUND_ROBIN"/>
+                                <xs:enumeration value="LOAD_BALANCE"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="CompletionRule">
+                <xs:complexType>
+                    <xs:attribute name="type" default="ANY">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="ANY"/>
+                                <xs:enumeration value="ALL"/>
+                                <xs:enumeration value="N"/>
+                                <xs:enumeration value="PERCENTAGE"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                    <xs:attribute name="threshold" type="xs:decimal" default="1"/>
+                    <xs:attribute name="timeout" type="xs:positiveInteger"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="Form" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Field" type="sc:FormField" minOccurs="0" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                    <xs:attribute name="schemaRef" type="xs:anyURI"/>
+                    <xs:attribute name="version" type="xs:string"/>
+                    <xs:attribute name="layout" default="vertical">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="vertical"/>
+                                <xs:enumeration value="horizontal"/>
+                                <xs:enumeration value="grid"/>
+                                <xs:enumeration value="tab"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                    <xs:attribute name="columns" type="xs:positiveInteger" default="1"/>
+                    <xs:anyAttribute namespace="##other" processContents="lax"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="DataMapping" type="sc:DataMapping" minOccurs="0"/>
+            <xs:element name="ExtendedOperation" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="allowAddUser" type="xs:boolean" default="false"/>
+                    <xs:attribute name="allowTransfer" type="xs:boolean" default="false"/>
+                    <xs:attribute name="allowBack" type="xs:boolean" default="false"/>
+                    <xs:attribute name="allowDelegate" type="xs:boolean" default="false"/>
+                    <xs:attribute name="allowUrge" type="xs:boolean" default="false"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="FaultHandler" type="sc:FaultHandler" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="category" type="xs:string"/>
+        <xs:attribute name="urgency" default="NORMAL">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="LOW"/>
+                    <xs:enumeration value="NORMAL"/>
+                    <xs:enumeration value="HIGH"/>
+                    <xs:enumeration value="URGENT"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+    </xs:complexType>
+    
+    <!-- ========== 10. 表单字段 ========== -->
+    <xs:complexType name="FormField">
+        <xs:attribute name="name" type="xs:string" use="required"/>
+        <xs:attribute name="type" type="xs:string" use="required"/>
+        <xs:attribute name="label" type="xs:string"/>
+        <xs:attribute name="component" type="xs:string"/>
+        <xs:attribute name="required" type="xs:boolean" default="false"/>
+        <xs:attribute name="permission" default="EDITABLE">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="EDITABLE"/>
+                    <xs:enumeration value="READ_ONLY"/>
+                    <xs:enumeration value="HIDDEN"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="options" type="xs:string"/>
+        <xs:attribute name="validation" type="xs:string"/>
+        <xs:attribute name="defaultValue" type="xs:string"/>
+    </xs:complexType>
+    
+    <!-- ========== 11. 网关 ========== -->
+    <xs:complexType name="Gateway">
+        <xs:attribute name="mode" default="SPLIT">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="SPLIT"/>
+                    <xs:enumeration value="JOIN"/>
+                    <xs:enumeration value="BOTH"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+    </xs:complexType>
+    
+    <!-- ========== 12. 子流程 ========== -->
+    <xs:complexType name="SubProcess">
+        <xs:sequence>
+            <xs:element name="WorkflowRef">
+                <xs:complexType>
+                    <xs:attribute name="packageId" type="xs:string" use="required"/>
+                    <xs:attribute name="workflowId" type="xs:string" use="required"/>
+                    <xs:attribute name="version" type="sc:VersionType" use="required"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="DataMapping" type="sc:DataMapping" minOccurs="0"/>
+            <!-- 执行策略配置（4种模式：TX, ASYNC, FUTURE, FORKJOIN） -->
+            <xs:element name="ExecutionStrategy" type="sc:ExecutionStrategy" minOccurs="0"/>
+            <!-- FUTURE模式特有：依赖关系配置 -->
+            <xs:element name="Dependencies" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Depend" maxOccurs="unbounded">
+                            <xs:complexType>
+                                <xs:attribute name="activityId" type="xs:string" use="required"/>
+                                <xs:attribute name="must" type="xs:boolean" default="true"/>
+                                <xs:attribute name="resultMapping" type="xs:string"/>
+                            </xs:complexType>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <!-- FUTURE模式特有：回调配置 -->
+            <xs:element name="Callback" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="onSuccess" type="xs:string"/>
+                    <xs:attribute name="onFailure" type="xs:string"/>
+                    <xs:attribute name="onTimeout" type="xs:string"/>
+                    <xs:attribute name="defaultValue" type="xs:string"/>
+                </xs:complexType>
+            </xs:element>
+            <!-- FORKJOIN模式特有：输入数据格式定义 -->
+            <xs:element name="InputSchema" minOccurs="0">
+                <xs:complexType>
+                    <xs:attribute name="type" default="LIST">
+                        <xs:simpleType>
+                            <xs:restriction base="xs:string">
+                                <xs:enumeration value="SINGLE"/>
+                                <xs:enumeration value="LIST"/>
+                                <xs:enumeration value="MAP"/>
+                                <xs:enumeration value="STREAM"/>
+                            </xs:restriction>
+                        </xs:simpleType>
+                    </xs:attribute>
+                    <xs:attribute name="itemType" type="xs:string" default="java.util.Map"/>
+                    <xs:attribute name="sizeField" type="xs:string"/>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="FaultHandler" type="sc:FaultHandler" minOccurs="0"/>
+        </xs:sequence>
+    </xs:complexType>
+    
+    <!-- ========== 13. 事件 ========== -->
+    <xs:complexType name="StartEvent">
+        <xs:sequence>
+            <xs:element name="DataMapping" type="sc:DataMapping" minOccurs="0"/>
+            <xs:element name="FaultHandler" type="sc:FaultHandler" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="initiator" type="xs:string"/>
+        <xs:attribute name="type" default="none">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="none"/>
+                    <xs:enumeration value="message"/>
+                    <xs:enumeration value="signal"/>
+                    <xs:enumeration value="timer"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="messageRef" type="xs:string"/>
+        <xs:attribute name="signalRef" type="xs:string"/>
+        <xs:attribute name="timerExpression" type="xs:string"/>
+    </xs:complexType>
+    
+    <xs:complexType name="EndEvent">
+        <xs:sequence>
+            <xs:element name="DataMapping" type="sc:DataMapping" minOccurs="0"/>
+            <xs:element name="FaultHandler" type="sc:FaultHandler" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="type" default="none">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="none"/>
+                    <xs:enumeration value="message"/>
+                    <xs:enumeration value="signal"/>
+                    <xs:enumeration value="terminate"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="messageRef" type="xs:string"/>
+        <xs:attribute name="signalRef" type="xs:string"/>
+    </xs:complexType>
+    
+    <!-- ========== 14. 活动 ========== -->
+    <xs:complexType name="Activity">
+        <xs:sequence>
+            <xs:choice>
+                <xs:element name="StartEvent" type="sc:StartEvent"/>
+                <xs:element name="EndEvent" type="sc:EndEvent"/>
+                <xs:element name="AutoTask" type="sc:AutoTask"/>
+                <xs:element name="UserTask" type="sc:UserTask"/>
+                <xs:element name="SubProcess" type="sc:SubProcess"/>
+                <xs:element name="Gateway" type="sc:Gateway"/>
+            </xs:choice>
+        </xs:sequence>
+        <xs:attribute name="id" type="xs:string" use="required"/>
+        <xs:attribute name="name" type="xs:string" use="required"/>
+        <xs:attribute name="description" type="xs:string"/>
+        <xs:attribute name="documentation" type="xs:anyURI"/>
+        <xs:attribute name="type" use="required">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="START_EVENT"/>
+                    <xs:enumeration value="END_EVENT"/>
+                    <xs:enumeration value="AUTO_TASK"/>
+                    <xs:enumeration value="USER_TASK"/>
+                    <xs:enumeration value="SUB_PROCESS"/>
+                    <xs:enumeration value="EXCLUSIVE_GATEWAY"/>
+                    <xs:enumeration value="PARALLEL_GATEWAY"/>
+                    <xs:enumeration value="INCLUSIVE_GATEWAY"/>
+                    <xs:enumeration value="COMPLEX_GATEWAY"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="x" type="xs:integer"/>
+        <xs:attribute name="y" type="xs:integer"/>
+        <xs:attribute name="width" type="xs:integer" default="120"/>
+        <xs:attribute name="height" type="xs:integer" default="60"/>
+    </xs:complexType>
+    
+    <!-- ========== 15. 转移 ========== -->
+    <xs:complexType name="Transition">
+        <xs:attribute name="id" type="xs:string" use="required"/>
+        <xs:attribute name="from" type="xs:string" use="required"/>
+        <xs:attribute name="to" type="xs:string" use="required"/>
+        <xs:attribute name="condition" type="xs:string"/>
+        <xs:attribute name="priority" type="xs:integer" default="1"/>
+        <xs:attribute name="expressionLanguage" type="sc:ExpressionLanguageType" default="SpEL"/>
+        <xs:attribute name="default" type="xs:boolean" default="false"/>
+        <xs:attribute name="sourceAnchor" type="sc:AnchorType" default="RIGHT"/>
+        <xs:attribute name="targetAnchor" type="sc:AnchorType" default="LEFT"/>
+        <xs:attribute name="waypoints" type="xs:string"/>
+    </xs:complexType>
+    
+    <!-- ========== 16. 流程 ========== -->
+    <xs:complexType name="Workflow">
+        <xs:sequence>
+            <!-- 参数定义（契约） -->
+            <xs:element name="Parameters" minOccurs="0">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Parameter" maxOccurs="unbounded">
+                            <xs:complexType>
+                                <xs:attribute name="name" type="xs:string" use="required"/>
+                                <xs:attribute name="type" type="sc:DataType" use="required"/>
+                                <xs:attribute name="className" type="xs:string"/>
+                                <xs:attribute name="direction" default="INOUT">
+                                    <xs:simpleType>
+                                        <xs:restriction base="xs:string">
+                                            <xs:enumeration value="IN"/>
+                                            <xs:enumeration value="OUT"/>
+                                            <xs:enumeration value="INOUT"/>
+                                        </xs:restriction>
+                                    </xs:simpleType>
+                                </xs:attribute>
+                                <xs:attribute name="required" type="xs:boolean" default="true"/>
+                            </xs:complexType>
+                        </xs:element>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="Activities">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Activity" type="sc:Activity" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="Transitions">
+                <xs:complexType>
+                    <xs:sequence>
+                        <xs:element name="Transition" type="sc:Transition" maxOccurs="unbounded"/>
+                    </xs:sequence>
+                </xs:complexType>
+            </xs:element>
+            <xs:element name="DebugProfile" type="sc:DebugProfile" minOccurs="0"/>
+            <xs:element name="MonitoringProfile" type="sc:MonitoringProfile" minOccurs="0"/>
+        </xs:sequence>
+        <xs:attribute name="id" type="xs:string" use="required"/>
+        <xs:attribute name="name" type="xs:string" use="required"/>
+        <xs:attribute name="version" type="sc:VersionType" use="required"/>
+        <xs:attribute name="type" default="MAIN">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="MAIN"/>
+                    <xs:enumeration value="SUB"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+        <xs:attribute name="expressionLanguage" type="sc:ExpressionLanguageType" default="SpEL"/>
+        <xs:attribute name="tenantId" type="xs:string" default="default"/>
+        <!-- 新增：契约模式 -->
+        <xs:attribute name="contractMode" default="STRICT">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:enumeration value="DYNAMIC"/>
+                    <xs:enumeration value="WEAK"/>
+                    <xs:enumeration value="STRICT"/>
+                </xs:restriction>
+            </xs:simpleType>
+        </xs:attribute>
+    </xs:complexType>
+    
+    <!-- ========== 17. 包 ========== -->
+    <xs:element name="Package">
+        <xs:complexType>
+            <xs:sequence>
+                <xs:element name="Messages" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="Message" type="sc:MessageType" maxOccurs="unbounded"/>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="Workflow" type="sc:Workflow" maxOccurs="unbounded"/>
+                <xs:element name="Dependencies" minOccurs="0">
+                    <xs:complexType>
+                        <xs:sequence>
+                            <xs:element name="Import" maxOccurs="unbounded">
+                                <xs:complexType>
+                                    <xs:attribute name="packageId" type="xs:string" use="required"/>
+                                    <xs:attribute name="versionRange" type="xs:string" use="required"/>
+                                    <xs:attribute name="optional" type="xs:boolean" default="false"/>
+                                </xs:complexType>
+                            </xs:element>
+                        </xs:sequence>
+                    </xs:complexType>
+                </xs:element>
+                <xs:element name="GlobalConfig" minOccurs="0">
+                    <xs:complexType>
+                        <xs:all>
+                            <xs:element name="DebugProfile" type="sc:DebugProfile" minOccurs="0"/>
+                            <xs:element name="MonitoringProfile" type="sc:MonitoringProfile" minOccurs="0"/>
+                            <xs:element name="DeploymentProfile" type="sc:DeploymentProfile" minOccurs="0"/>
+                            <xs:element name="DefaultFaultHandler" type="sc:FaultHandler" minOccurs="0"/>
+                        </xs:all>
+                    </xs:complexType>
+                </xs:element>
+            </xs:sequence>
+            <xs:attribute name="id" type="xs:string" use="required"/>
+            <xs:attribute name="name" type="xs:string" use="required"/>
+            <xs:attribute name="version" type="sc:VersionType" use="required"/>
+            <xs:attribute name="expressionLanguage" type="sc:ExpressionLanguageType" default="SpEL"/>
+            <xs:attribute name="tenantId" type="xs:string" default="default"/>
+        </xs:complexType>
+    </xs:element>
+</xs:schema>
